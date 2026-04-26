@@ -230,9 +230,6 @@ def build_parser() -> argparse.ArgumentParser:
     stat_parser = subparsers.add_parser("stat", help="comprehensive one-shot snapshot (cpu/mem/disk/swap/net/io)")
     stat_parser.add_argument("metric", nargs="?", help="cpu|memory|disk|swap|net|io")
 
-    stat_parser = subparsers.add_parser("stat", help="one-shot snapshot (cpu/memory/disk/swap/net/io)")
-    stat_parser.add_argument("metric", nargs="?", help="cpu|memory|disk|swap|net|io")
-
     top_parser = subparsers.add_parser("top", help="show top CPU processes")
     top_parser.add_argument("--limit", "-n", type=int, default=10)
 
@@ -374,7 +371,6 @@ def watch(interval: int, settings: Settings | None = None, metric: str | None = 
     interval = max(interval, 2)
     try:
         while True:
-            snapshot, swap, net, io = _collect_all(settings)
             print("\033[2J\033[H", end="")
             if metric:
                 print(_stat_single(metric, settings))
