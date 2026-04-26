@@ -11,11 +11,8 @@ from monix import __version__
 from monix.config import Settings
 from monix.core.assistant import answer, infer_service_name, local_answer
 from monix.picker import NO_ARG_COMMANDS, pick, pick_with_filter
-from monix.tools.logs import tail_log
-from monix.picker import NO_ARG_COMMANDS, pick
 from monix.tools.logs import follow_log, registry, tail_log
 from monix.tools.logs.docker import follow_container, tail_container
-from monix.tools.processes import top_processes
 from monix.tools.services import service_status
 from monix.render import (
     clear_screen,
@@ -26,24 +23,17 @@ from monix.render import (
     render_logs,
     render_reply,
     render_processes,
-    render_snapshot,
-    render_welcome, render_memory, render_disk, render_cpu,
-)
-from monix.tools.system import collect_snapshot, cpu_usage_percent, disk_info, load_average, memory_info, top_processes
-from monix.tools.system import collect_snapshot
-from monix.render import (
-    clear_screen,
-    prompt,
-    render_logs,
-    render_reply,
-    render_processes,
     render_service,
     render_snapshot,
+    render_welcome,
+    render_memory,
+    render_disk,
+    render_cpu,
     render_tool_done,
     render_tool_fail,
     render_tool_start,
-    render_welcome,
 )
+from monix.tools.system import collect_snapshot, cpu_usage_percent, disk_info, load_average, memory_info, top_processes
 
 
 HELP = """Commands:
@@ -78,118 +68,37 @@ _HISTORY: list[str] = []
 
 
 def _read_line(prompt_str: str) -> str:
-    """프롬프트 출력 후 raw 모드로 한 줄 읽기. '/'가 첫 글자면 라이브 피커를 즉시 실행."""
+    """readline/input 기반 입력. 한글 IME와 좌우 이동을 유지하고 '/' 단독 입력 시 피커를 연다."""
     try:
-        import termios as _T
-        import tty as _tty
+        import readline as _rl
     except ImportError:
-        return input(prompt_str)
+        _rl = None
 
-    if not sys.stdout.isatty():
-        return input(prompt_str)
+    if _rl is not None:
+        existing = {_rl.get_history_item(i) for i in range(1, _rl.get_current_history_length() + 1)}
+        for entry in _HISTORY:
+            if entry and entry not in existing:
+                _rl.add_history(entry)
 
-    sys.stdout.write(prompt_str)
-    sys.stdout.flush()
+    raw = input(prompt_str)
+    if raw.strip() != "/":
+        return raw
 
-    prompt_line = prompt_str.lstrip("\n")  # 프롬프트 재표시용 (앞의 개행 제거)
-    buf: list[str] = []
-    hist_pos = len(_HISTORY)
-    fd = sys.stdin.fileno()
-    saved = _T.tcgetattr(fd)
+    selected = pick_with_filter() or pick()
+    if not selected:
+        return ""
+    if selected in NO_ARG_COMMANDS:
+        return selected
 
+    if _rl is None:
+        return selected
+
+    _rl.set_startup_hook(lambda: _rl.insert_text(selected + " "))
     try:
-        _tty.setraw(fd)
-        while True:
-            b = sys.stdin.buffer.read(1)
-
-            if b in (b"\r", b"\n"):
-                sys.stdout.write("\n")
-                sys.stdout.flush()
-                return "".join(buf)
-
-            if b == b"\x03":
-                sys.stdout.write("\n")
-                sys.stdout.flush()
-                raise KeyboardInterrupt
-
-            if b == b"\x04":
-                if not buf:
-                    sys.stdout.write("\n")
-                    sys.stdout.flush()
-                    raise EOFError
-                continue
-
-            if b == b"\x7f":
-                if buf:
-                    buf.pop()
-                    sys.stdout.write("\b \b")
-                    sys.stdout.flush()
-                continue
-
-            if b == b"\x1b":
-                b2 = sys.stdin.buffer.read(1)
-                if b2 == b"[":
-                    b3 = sys.stdin.buffer.read(1)
-                    if b3 == b"A" and _HISTORY:  # 위 방향키 — 히스토리
-                        hist_pos = max(0, hist_pos - 1)
-                        entry = _HISTORY[hist_pos]
-                        sys.stdout.write(f"\r\033[K{prompt_line}{entry}")
-                        sys.stdout.flush()
-                        buf[:] = list(entry)
-                    elif b3 == b"B":  # 아래 방향키 — 히스토리
-                        if hist_pos < len(_HISTORY) - 1:
-                            hist_pos += 1
-                            entry = _HISTORY[hist_pos]
-                            sys.stdout.write(f"\r\033[K{prompt_line}{entry}")
-                            sys.stdout.flush()
-                            buf[:] = list(entry)
-                        else:
-                            hist_pos = len(_HISTORY)
-                            sys.stdout.write(f"\r\033[K{prompt_line}")
-                            sys.stdout.flush()
-                            buf.clear()
-                continue
-
-            try:
-                char = b.decode("utf-8")
-            except UnicodeDecodeError:
-                continue
-
-            # '/'가 첫 글자 → 라이브 피커 즉시 실행
-            if char == "/" and not buf:
-                _T.tcsetattr(fd, _T.TCSADRAIN, saved)
-                result = pick_with_filter()
-                if result:
-                    # 피커가 _clear() 후 커서를 프롬프트 줄 맨 앞에 둠
-                    sys.stdout.write(f"\r\033[K{prompt_line}{result}\n")
-                    sys.stdout.flush()
-                    if result in NO_ARG_COMMANDS:
-                        return result
-                    # 인자가 필요한 명령어 — readline으로 pre-fill
-                    try:
-                        import readline as _rl
-                        _rl.set_startup_hook(lambda: _rl.insert_text(result + " "))
-                        try:
-                            full = input(prompt()).strip()
-                        finally:
-                            _rl.set_startup_hook(None)
-                        return full or result
-                    except ImportError:
-                        return result
-                # 취소 — 프롬프트 줄 복원
-                sys.stdout.write(f"\r\033[K{prompt_line}")
-                sys.stdout.flush()
-                _tty.setraw(fd)
-                buf.clear()
-                hist_pos = len(_HISTORY)
-                continue
-
-            if char.isprintable():
-                buf.append(char)
-                sys.stdout.write(char)
-                sys.stdout.flush()
+        full = input(prompt()).strip()
     finally:
-        _T.tcsetattr(fd, _T.TCSADRAIN, saved)
+        _rl.set_startup_hook(None)
+    return full or selected
 
 
 class Spinner:
@@ -346,15 +255,14 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             history.clear()
         return "대화 기록을 초기화했습니다. 새로운 대화를 시작해요!"
     if command == "/status":
-        return render_snapshot(collect_snapshot(settings))
+        snap = _run_with_indicator("snapshot", collect_snapshot, settings)
+        return render_snapshot(snap)
     if command == "/cpu":
         return render_cpu(cpu_usage_percent(), load_average())
     if command == "/memory":
         return render_memory(memory_info())
     if command == "/disk":
         return render_disk(disk_info())
-        snap = _run_with_indicator("snapshot", collect_snapshot, settings.thresholds)
-        return render_snapshot(snap)
     if command == "/watch":
         interval = _int_arg(args, 0, 5)
         return watch(interval, settings)
@@ -362,7 +270,6 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         limit = _int_arg(args, 0, 10)
         procs = _run_with_indicator("top_processes", top_processes, limit)
         return render_processes(procs)
-        return render_processes(top_processes(limit))
     if command == "/log":
         return _dispatch_log(args, settings)
     if command == "/logs":
