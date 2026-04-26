@@ -263,6 +263,83 @@ def _io_stat_lines(devices: list[dict], inner: int) -> list[str]:
     ]
 
 
+def render_history(records: list[dict], metric: str | None, period_label: str = "") -> str:
+    """수집 이력을 테이블로 렌더링."""
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    m = (metric or "").lower()
+    metric_label = {"cpu": "CPU", "memory": "메모리", "mem": "메모리", "disk": "디스크", "swap": "스왑", "net": "네트워크", "network": "네트워크", "io": "디스크 I/O"}.get(m, "전체")
+    count_label = f"{len(records)}건"
+    title_parts = [f"  {style(metric_label + ' 이력', 'bold')}"]
+    if period_label:
+        title_parts.append(f"  {style(period_label, 'muted')}")
+    title_parts.append(f"  {style(count_label, 'muted')}")
+    title = "  ·  ".join(p.strip() for p in title_parts)
+
+    lines = [_rule(width, "top"), _text(title, inner), _rule(width)]
+
+    if not records:
+        lines += [_text("데이터가 없습니다.", inner), _rule(width, "bottom")]
+        return "\n".join(lines)
+
+    def _ts(r: dict) -> str:
+        ts = r.get("_ts")
+        if hasattr(ts, "strftime"):
+            return ts.strftime("%m-%d %H:%M")
+        return str(r.get("timestamp", ""))[:16]
+
+    if m == "cpu":
+        lines.append(_text(f"  {'시간':<16}  {'CPU':>7}   Load avg", inner))
+        lines.append(_rule(width))
+        for r in records:
+            cpu = f"{r.get('cpu_percent') or 0:.1f}%"
+            load = r.get("load_average") or []
+            load_str = "  ".join(f"{v:.2f}" for v in load) if load else "-"
+            lines.append(_text(f"  {_ts(r):<16}  {cpu:>7}   {load_str}", inner))
+
+    elif m in ("memory", "mem"):
+        lines.append(_text(f"  {'시간':<16}  {'메모리':>7}   Used", inner))
+        lines.append(_rule(width))
+        for r in records:
+            mem = r.get("memory") or {}
+            pct = f"{mem.get('percent') or 0:.1f}%"
+            used = human_bytes(mem.get("used"))
+            lines.append(_text(f"  {_ts(r):<16}  {pct:>7}   {used}", inner))
+
+    elif m == "disk":
+        lines.append(_text(f"  {'시간':<16}  {'디스크':>7}   Mount", inner))
+        lines.append(_rule(width))
+        for r in records:
+            disks = r.get("disks") or []
+            if disks:
+                first = disks[0]
+                pct = f"{first.get('percent') or 0:.1f}%"
+                lines.append(_text(f"  {_ts(r):<16}  {pct:>7}   {first.get('path', '/')}", inner))
+
+    elif m == "swap":
+        lines.append(_text(f"  {'시간':<16}  {'스왑':>7}   Used", inner))
+        lines.append(_rule(width))
+        for r in records:
+            swap = r.get("swap") or {}
+            pct = f"{swap.get('percent') or 0:.1f}%" if swap.get("percent") is not None else "-"
+            used = human_bytes(swap.get("used"))
+            lines.append(_text(f"  {_ts(r):<16}  {pct:>7}   {used}", inner))
+
+    else:  # all / net / io → 전체 요약
+        lines.append(_text(f"  {'시간':<16}  {'CPU':>7}  {'메모리':>7}  {'디스크':>7}", inner))
+        lines.append(_rule(width))
+        for r in records:
+            cpu = f"{r.get('cpu_percent') or 0:.1f}%"
+            mem = r.get("memory") or {}
+            mem_pct = f"{mem.get('percent') or 0:.1f}%"
+            disks = r.get("disks") or []
+            disk_pct = f"{disks[0].get('percent') or 0:.1f}%" if disks else "-"
+            lines.append(_text(f"  {_ts(r):<16}  {cpu:>7}  {mem_pct:>7}  {disk_pct:>7}", inner))
+
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
+
+
 def render_processes(processes: list[dict]) -> str:
     return "\n".join([style("PID      CPU%   MEM%   COMMAND", "bold"), *_process_lines(processes)])
 
