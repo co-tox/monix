@@ -33,36 +33,55 @@ COMMANDS: list[tuple[str, str]] = [
 
 NO_ARG_COMMANDS = {"/status", "/stat", "/cpu", "/memory", "/disk", "/swap", "/net", "/io", "/clear", "/help", "/exit"}
 
-# Fixed height: filter line + blank separator + one slot per command.
-_PICKER_BLOCK = 2 + len(COMMANDS)
+# Fixed height = one slot per command (filter lives on the prompt line itself).
+_PICKER_BLOCK = len(COMMANDS)
 
 
-def pick_with_filter() -> str | None:
-    """라이브 필터 피커.
+def pick_with_filter(prompt_prefix: str = "") -> str | None:
+    """Claude Code / Codex 스타일 라이브 필터 피커.
 
-    - 고정 높이 블록 선점으로 in-place 업데이트 (스크롤 없음)
-    - 한글 포함 멀티바이트 UTF-8 입력 지원
-    - 좌/우 방향키로 필터 줄 안에서 커서 이동
-    - 매 _draw() 완료 후 커서는 필터 줄(P+1) 안에 위치
+    필터 입력은 프롬프트 줄(P) 위에 인라인으로 표시되고,
+    항목 목록은 P+1 ~ P+N 에 in-place 렌더링된다.
+
+    레이아웃:
+        P       monix > /stat              ← 프롬프트 + 필터 (인라인)
+        P+1     ❯ /status   서버 상태       ← 선택된 항목 (cyan + bold)
+        P+2       /cpu      CPU 사용률      ← 나머지 항목 (dim)
+        ...
     """
     if not _HAS_TTY or not sys.stdout.isatty():
         return None
 
     N = len(COMMANDS)
-    BLOCK = _PICKER_BLOCK  # filter(1) + blank(1) + items(N)
+    BLOCK = _PICKER_BLOCK  # = N  (items only; filter is on P)
 
-    query_buf: list[str] = []   # 필터 문자 목록
-    q_cursor = 0                # 필터 줄 커서 위치 (문자 단위)
-    idx = 0                     # 선택된 항목 인덱스
+    query_buf: list[str] = []
+    q_cursor = 0
+    idx = 0
     initialized = False
-    pending = bytearray()       # 멀티바이트 누적 버퍼
+    pending = bytearray()
 
-    # ── 공통 유틸 ────────────────────────────────────────────────────
+    # ── 유틸 ─────────────────────────────────────────────────────────
     def _cw(c: str) -> int:
         return 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
 
     def _q_width(chars) -> int:
         return sum(_cw(c) for c in chars)
+
+    def _vis_width(s: str) -> int:
+        """ANSI 시퀀스를 제거한 터미널 표시 너비."""
+        w = 0
+        in_esc = False
+        for c in s:
+            if c == "\033":
+                in_esc = True
+                continue
+            if in_esc:
+                if c == "m":
+                    in_esc = False
+                continue
+            w += _cw(c)
+        return w
 
     def _items() -> list[tuple[str, str]]:
         query = "".join(query_buf)
@@ -71,7 +90,8 @@ def pick_with_filter() -> str | None:
         prefix = ("/" + query).lower()
         return [(cmd, desc) for cmd, desc in COMMANDS if cmd.lower().startswith(prefix)]
 
-    def _label() -> str:
+    def _filter_inline() -> str:
+        """프롬프트 뒤에 붙는 /query 문자열 (ANSI 포함)."""
         query = "".join(query_buf)
         if query:
             return f"\033[36m/\033[1m{query}\033[0m"
@@ -79,65 +99,63 @@ def pick_with_filter() -> str | None:
 
     # ── 렌더링 ───────────────────────────────────────────────────────
     def _draw() -> None:
-        """고정 블록을 in-place 갱신하고 커서를 필터 줄(P+1) q_cursor 위치에 둔다."""
         nonlocal initialized
         items = _items()
         out = []
 
         if not initialized:
-            # P+1 ~ P+BLOCK 라인을 미리 확보한다.
-            # "\r\n" × BLOCK → 커서 P+BLOCK col 0
+            # P+1 ~ P+N 라인 미리 확보. 커서 → P+N col 0
             out.append("\r\n" * BLOCK)
-            # BLOCK-1 줄 위로 → P+1 col 0
-            out.append(f"\033[{BLOCK - 1}A\r")
+            # BLOCK 줄 위로 → P col 0
+            out.append(f"\033[{BLOCK}A\r")
             initialized = True
         else:
-            # 이전 _draw() 후 커서는 P+1(필터 줄) q_cursor 위치.
-            # \r 로 col 0 으로 이동.
+            # _draw() 완료 후 커서는 P q_cursor 열 → \r 로 col 0
             out.append("\r")
 
-        # P+1: 필터 줄
-        out.append(f"\033[K{_label()}")
+        # P: 프롬프트 + 필터 인라인
+        out.append(f"\033[K{prompt_prefix}{_filter_inline()}")
 
-        # P+2: 빈 구분선  (\033[1B\r = 스크롤 없이 한 줄 아래 col 0)
-        out.append("\033[1B\r\033[K")
-
-        # P+3 ~ P+BLOCK: 항목 (항상 N 슬롯 — 필터링 결과 개수 무관)
+        # P+1 ~ P+N: 항목 슬롯 (항상 N 개, 내용 없으면 빈 줄)
         for i in range(N):
             out.append("\033[1B\r")
             if not items:
-                content = "\033[2m(일치하는 명령어 없음)\033[0m" if i == 0 else ""
+                content = "\033[2m  (일치하는 명령어 없음)\033[0m" if i == 0 else ""
             elif i < len(items):
                 cmd, desc = items[i]
                 if i == idx:
-                    content = f"\033[36m❯ {cmd:<12}\033[0m  \033[2m{desc}\033[0m"
+                    # 선택된 항목: ❯ + cyan bold 명령 + dim 설명
+                    content = (
+                        f"\033[36m❯ \033[1m{cmd:<12}\033[0m"
+                        f"  \033[2m{desc}\033[0m"
+                    )
                 else:
-                    content = f"  {cmd:<12}  \033[2m{desc}\033[0m"
+                    # 비선택: 모두 dim
+                    content = f"\033[2m  {cmd:<12}  {desc}\033[0m"
             else:
                 content = ""
             out.append(f"\033[K  {content}" if content else "\033[K")
 
-        # 커서를 P+1(필터 줄) q_cursor 열로 복원
-        # 현재 커서: P+BLOCK  →  BLOCK-1 줄 위로 이동 → P+1 col 0
-        out.append(f"\033[{BLOCK - 1}A\r")
-        # '/' 1열 + query_buf[:q_cursor] 의 표시 너비
-        q_col = 1 + _q_width(query_buf[:q_cursor])
+        # 커서를 P q_cursor 열로 복원
+        # 현재 위치 P+N → BLOCK 줄 위로 → P col 0
+        out.append(f"\033[{BLOCK}A\r")
+        # 프롬프트 가시 너비 + '/' 1열 + query[:q_cursor] 너비
+        q_col = _vis_width(prompt_prefix) + 1 + _q_width(query_buf[:q_cursor])
         out.append(f"\033[{q_col}C")
 
         sys.stdout.write("".join(out))
         sys.stdout.flush()
 
     def _clear() -> None:
-        """드롭다운을 지우고 커서를 프롬프트 줄(P) col 0 으로 복원.
+        """드롭다운 소거 후 커서를 P col 0 으로 복원.
 
-        _draw() 후 커서는 P+1(필터 줄)에 있으므로 여기서 출발한다.
+        _draw() 완료 후 커서는 P q_cursor 열에 있다.
         """
         out = []
-        out.append("\r")                        # P+1 col 0
-        for _ in range(BLOCK - 1):
-            out.append("\033[K\033[1B\r")       # 지우고 한 줄 아래 col 0
-        out.append("\033[K")                    # P+BLOCK 지우기 (줄 이동 없음)
-        out.append(f"\033[{BLOCK}A\r")          # P col 0 으로 복귀
+        out.append("\r\033[K")              # P 지우기 (커서 P col 0)
+        for _ in range(BLOCK):
+            out.append("\033[1B\r\033[K")   # P+1 ~ P+N 지우기
+        out.append(f"\033[{BLOCK + 1}A\r")  # 다시 P col 0 으로
         sys.stdout.write("".join(out))
         sys.stdout.flush()
 
@@ -169,21 +187,20 @@ def pick_with_filter() -> str | None:
                     elif b3 == b"D":  # 왼쪽 → 필터 커서 왼쪽
                         if q_cursor > 0:
                             q_cursor -= 1
-                    elif b3 == b"H":  # Home
+                    elif b3 == b"H":
                         q_cursor = 0
-                    elif b3 == b"F":  # End
+                    elif b3 == b"F":
                         q_cursor = len(query_buf)
                     elif b3.isdigit():
-                        # \x1b[{숫자}~ 또는 \x1b[{숫자};…{letter} 전체 소비
                         seq = b3
                         while not (seq[-1:].isalpha() or seq.endswith(b"~")):
                             seq += sys.stdin.buffer.read(1)
-                        if seq == b"3~" and q_cursor < len(query_buf):  # Delete
+                        if seq == b"3~" and q_cursor < len(query_buf):
                             query_buf.pop(q_cursor)
                             idx = 0
-                        elif seq in (b"1~", b"7~"):   # Home 변형
+                        elif seq in (b"1~", b"7~"):
                             q_cursor = 0
-                        elif seq in (b"4~", b"8~"):   # End 변형
+                        elif seq in (b"4~", b"8~"):
                             q_cursor = len(query_buf)
                 else:
                     _clear()
@@ -192,7 +209,12 @@ def pick_with_filter() -> str | None:
             # ── Enter → 선택 ─────────────────────────────────────────
             elif b in (b"\r", b"\n"):
                 items = _items()
-                selected = items[idx][0] if items else None
+                if items:
+                    selected = items[idx][0]
+                elif query_buf:
+                    selected = "/" + "".join(query_buf)
+                else:
+                    selected = None
                 _clear()
                 return selected
 
@@ -243,7 +265,7 @@ def pick_with_filter() -> str | None:
 
 
 def pick() -> str | None:
-    """방향키로 명령어를 선택한다. 선택된 명령어 문자열을 반환하거나 취소 시 None."""
+    """방향키로 명령어를 선택한다. 취소 시 None."""
     if not _HAS_TTY or not sys.stdout.isatty():
         return None
 
@@ -259,9 +281,9 @@ def pick() -> str | None:
             buf.append(f"\033[{n}A\r")
         for i, (cmd, desc) in enumerate(cmds):
             if i == idx:
-                buf.append(f"  \033[36m❯ {cmd:<12}\033[0m  \033[2m{desc}\033[0m\033[K\n")
+                buf.append(f"  \033[36m❯ \033[1m{cmd:<12}\033[0m  \033[2m{desc}\033[0m\033[K\n")
             else:
-                buf.append(f"    {cmd:<12}  \033[2m{desc}\033[0m\033[K\n")
+                buf.append(f"  \033[2m  {cmd:<12}  {desc}\033[0m\033[K\n")
         sys.stdout.write("".join(buf))
         sys.stdout.flush()
 

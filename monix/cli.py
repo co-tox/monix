@@ -257,7 +257,8 @@ def _read_line(prompt_str: str) -> str:
             # ── '/' 첫 글자 → 라이브 피커 ───────────────────────────
             if b == b"/" and not buf:
                 _T.tcsetattr(fd, _T.TCSADRAIN, saved)
-                result = pick_with_filter()
+                # prompt_line 을 피커에 전달해 필터가 프롬프트 줄에 인라인으로 표시됨
+                result = pick_with_filter(prompt_line)
                 if result:
                     sys.stdout.write(f"\r\033[K{prompt_line}{result}\n")
                     sys.stdout.flush()

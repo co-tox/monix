@@ -9,7 +9,17 @@
       "Bash(pip3 show *)",
       "Bash(pip show *)",
       "Bash(.venv/bin/pytest tests/tools/test_logs_app.py tests/tools/test_logs_docker.py tests/tools/test_logs_registry.py tests/tools/test_logs_nginx.py tests/tools/test_logs_search.py -v)",
-      "Bash(.venv/bin/pytest tests/tools/test_logs_app.py tests/tools/test_logs_docker.py tests/tools/test_logs_registry.py tests/tools/test_logs_nginx.py tests/tools/test_logs_search.py -q)"
+      "Bash(.venv/bin/pytest tests/tools/test_logs_app.py tests/tools/test_logs_docker.py tests/tools/test_logs_registry.py tests/tools/test_logs_nginx.py tests/tools/test_logs_search.py -q)",
+      "Bash(python3 *)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python3 *)",
+      "Bash(.venv/bin/pytest *)",
+      "Bash(gh auth *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(.venv/bin/python -c ' *)"
     ]
   }
 }
