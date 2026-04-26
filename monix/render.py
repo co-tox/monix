@@ -106,12 +106,12 @@ def render_cpu(cpu_percent: float | None, load: tuple | None) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
     return "\n".join([
-        _rule(width),
+        _rule(width, "top"),
         _text(style("CPU", "bold"), inner),
-        _rule(width),
+        _rule(width, "mid"),
         _metric("CPU", cpu_percent, inner),
         _line("Load avg", _load(load), inner),
-        _rule(width),
+        _rule(width, "bottom"),
     ])
 
 
@@ -119,34 +119,34 @@ def render_memory(memory: dict) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
     return "\n".join([
-        _rule(width),
+        _rule(width, "top"),
         _text(style("Memory", "bold"), inner),
-        _rule(width),
+        _rule(width, "mid"),
         _metric("Memory", memory.get("percent"), inner, suffix=f"{human_bytes(memory.get('available'))} free"),
         _line("Used", human_bytes(memory.get("used")), inner),
         _line("Available", human_bytes(memory.get("available")), inner),
         _line("Total", human_bytes(memory.get("total")), inner),
-        _rule(width),
+        _rule(width, "bottom"),
     ])
 
 
 def render_disk(disks: list[dict]) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
-    lines = [_rule(width), _text(style("Disk", "bold"), inner), _rule(width)]
+    lines = [_rule(width, "top"), _text(style("Disk", "bold"), inner), _rule(width, "mid")]
     for disk in disks:
         suffix = f"{human_bytes(disk.get('free'))} free / {human_bytes(disk.get('total'))}"
         lines.append(_metric(disk["path"], disk.get("percent"), inner, suffix=suffix))
     if not disks:
         lines.append(_text("no disk data", inner))
-    lines.append(_rule(width))
+    lines.append(_rule(width, "bottom"))
     return "\n".join(lines)
 
 
 def render_network(interfaces: list[dict]) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
-    lines = [_rule(width), _text(style("Network I/O", "bold"), inner), _rule(width)]
+    lines = [_rule(width, "top"), _text(style("Network I/O", "bold"), inner), _rule(width, "mid")]
     visible = [i for i in interfaces if i["rx_bps"] > 0 or i["tx_bps"] > 0 or
                i.get("rx_bytes_total", 0) + i.get("tx_bytes_total", 0) >= 100 * 1024 * 1024]
     if not visible:
@@ -159,7 +159,7 @@ def render_network(interfaces: list[dict]) -> str:
             tx = human_bytes(int(iface["tx_bps"])) + "/s"
             label = iface["interface"]
             lines.append(_line(f"{label:<12}", f"↓ {rx:<14}  ↑ {tx}", inner))
-    lines.append(_rule(width))
+    lines.append(_rule(width, "bottom"))
     return "\n".join(lines)
 
 
@@ -169,28 +169,28 @@ def render_swap(swap: dict) -> str:
     total = swap.get("total") or 0
     if total == 0:
         return "\n".join([
-            _rule(width),
+            _rule(width, "top"),
             _text(style("Swap", "bold"), inner),
             _rule(width),
             _text("No swap (disabled)", inner),
             _rule(width),
         ])
     return "\n".join([
-        _rule(width),
+        _rule(width, "top"),
         _text(style("Swap", "bold"), inner),
-        _rule(width),
+        _rule(width, "mid"),
         _metric("Swap", swap.get("percent"), inner, suffix=f"{human_bytes(swap.get('free'))} free"),
         _line("Used", human_bytes(swap.get("used")), inner),
         _line("Free", human_bytes(swap.get("free")), inner),
         _line("Total", human_bytes(swap.get("total")), inner),
-        _rule(width),
+        _rule(width, "bottom"),
     ])
 
 
 def render_disk_io(devices: list[dict]) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
-    lines = [_rule(width), _text(style("Disk I/O", "bold"), inner), _rule(width)]
+    lines = [_rule(width, "top"), _text(style("Disk I/O", "bold"), inner), _rule(width, "mid")]
     if not devices:
         lines.append(_text("no disk I/O data", inner))
     else:
@@ -199,7 +199,7 @@ def render_disk_io(devices: list[dict]) -> str:
             write_s = human_bytes(int(dev["write_bps"])) + "/s"
             label = dev["device"]
             lines.append(_line(f"{label:<12}", f"R {read_s:<14}  W {write_s}", inner))
-    lines.append(_rule(width))
+    lines.append(_rule(width, "bottom"))
     return "\n".join(lines)
 
 
@@ -261,6 +261,83 @@ def _io_stat_lines(devices: list[dict], inner: int) -> list[str]:
               inner)
         for d in devices[:3]
     ]
+
+
+def render_history(records: list[dict], metric: str | None, period_label: str = "") -> str:
+    """수집 이력을 테이블로 렌더링."""
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    m = (metric or "").lower()
+    metric_label = {"cpu": "CPU", "memory": "메모리", "mem": "메모리", "disk": "디스크", "swap": "스왑", "net": "네트워크", "network": "네트워크", "io": "디스크 I/O"}.get(m, "전체")
+    count_label = f"{len(records)}건"
+    title_parts = [f"  {style(metric_label + ' 이력', 'bold')}"]
+    if period_label:
+        title_parts.append(f"  {style(period_label, 'muted')}")
+    title_parts.append(f"  {style(count_label, 'muted')}")
+    title = "  ·  ".join(p.strip() for p in title_parts)
+
+    lines = [_rule(width, "top"), _text(title, inner), _rule(width)]
+
+    if not records:
+        lines += [_text("데이터가 없습니다.", inner), _rule(width, "bottom")]
+        return "\n".join(lines)
+
+    def _ts(r: dict) -> str:
+        ts = r.get("_ts")
+        if hasattr(ts, "strftime"):
+            return ts.strftime("%m-%d %H:%M")
+        return str(r.get("timestamp", ""))[:16]
+
+    if m == "cpu":
+        lines.append(_text(f"  {'시간':<16}  {'CPU':>7}   Load avg", inner))
+        lines.append(_rule(width))
+        for r in records:
+            cpu = f"{r.get('cpu_percent') or 0:.1f}%"
+            load = r.get("load_average") or []
+            load_str = "  ".join(f"{v:.2f}" for v in load) if load else "-"
+            lines.append(_text(f"  {_ts(r):<16}  {cpu:>7}   {load_str}", inner))
+
+    elif m in ("memory", "mem"):
+        lines.append(_text(f"  {'시간':<16}  {'메모리':>7}   Used", inner))
+        lines.append(_rule(width))
+        for r in records:
+            mem = r.get("memory") or {}
+            pct = f"{mem.get('percent') or 0:.1f}%"
+            used = human_bytes(mem.get("used"))
+            lines.append(_text(f"  {_ts(r):<16}  {pct:>7}   {used}", inner))
+
+    elif m == "disk":
+        lines.append(_text(f"  {'시간':<16}  {'디스크':>7}   Mount", inner))
+        lines.append(_rule(width))
+        for r in records:
+            disks = r.get("disks") or []
+            if disks:
+                first = disks[0]
+                pct = f"{first.get('percent') or 0:.1f}%"
+                lines.append(_text(f"  {_ts(r):<16}  {pct:>7}   {first.get('path', '/')}", inner))
+
+    elif m == "swap":
+        lines.append(_text(f"  {'시간':<16}  {'스왑':>7}   Used", inner))
+        lines.append(_rule(width))
+        for r in records:
+            swap = r.get("swap") or {}
+            pct = f"{swap.get('percent') or 0:.1f}%" if swap.get("percent") is not None else "-"
+            used = human_bytes(swap.get("used"))
+            lines.append(_text(f"  {_ts(r):<16}  {pct:>7}   {used}", inner))
+
+    else:  # all / net / io → 전체 요약
+        lines.append(_text(f"  {'시간':<16}  {'CPU':>7}  {'메모리':>7}  {'디스크':>7}", inner))
+        lines.append(_rule(width))
+        for r in records:
+            cpu = f"{r.get('cpu_percent') or 0:.1f}%"
+            mem = r.get("memory") or {}
+            mem_pct = f"{mem.get('percent') or 0:.1f}%"
+            disks = r.get("disks") or []
+            disk_pct = f"{disks[0].get('percent') or 0:.1f}%" if disks else "-"
+            lines.append(_text(f"  {_ts(r):<16}  {cpu:>7}  {mem_pct:>7}  {disk_pct:>7}", inner))
+
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
 
 
 def render_processes(processes: list[dict]) -> str:

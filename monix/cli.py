@@ -11,8 +11,51 @@ import os
 
 from monix import __version__
 from monix.config import Settings
-from monix.core.assistant import answer, local_answer, infer_service_name
-from monix.monitor import (
+from monix.core.assistant import answer, infer_service_name, local_answer
+from monix.tools.collect import (
+    CollectorConfig,
+    collect_and_save,
+    load_config as load_collector_config,
+    load_history,
+    purge_old_files,
+    save_config as save_collector_config,
+)
+from monix.picker import NO_ARG_COMMANDS, pick, pick_with_filter
+from monix.tools.logs import follow_log, registry, search_log, tail_log
+from monix.tools.logs.docker import follow_container, list_containers, search_container, tail_container
+from monix.tools.services import service_status
+from monix.tools.logs.nginx import tail_nginx_access
+from monix.render import (
+    badge,
+    clear_screen,
+    colorize_log_line,
+    prompt,
+    render_docker_aliases,
+    render_docker_containers,
+    render_cpu,
+    render_disk,
+    render_disk_io,
+    render_log_aliases,
+    render_log_list,
+    render_log_search,
+    render_logs,
+    render_nginx_summary,
+    render_memory,
+    render_network,
+    render_reply,
+    render_history,
+    render_processes,
+    render_service,
+    render_snapshot,
+    render_stat,
+    render_swap,
+    render_tool_done,
+    render_tool_fail,
+    render_tool_start,
+    render_welcome,
+    style,
+)
+from monix.tools.system import (
     collect_snapshot,
     cpu_usage_percent,
     disk_info,
@@ -20,50 +63,17 @@ from monix.monitor import (
     load_average,
     memory_info,
     network_io,
-    service_status,
     swap_info,
-    tail_log,
     top_processes,
+    uptime_seconds_value,
 )
-from monix.render import (
-    badge,
-    clear_screen,
-    colorize_log_line,
-    prompt,
-    render_cpu,
-    render_disk,
-    render_disk_io,
-    render_docker_aliases,
-    render_docker_containers,
-    render_log_aliases,
-    render_log_list,
-    render_log_search,
-    render_logs,
-    render_memory,
-    render_network,
-    render_nginx_summary,
-    render_panel,
-    render_processes,
-    render_reply,
-    render_service,
-    render_snapshot,
-    render_swap,
-    render_welcome,
-    style,
-)
-from monix.tools.logs import registry
-from monix.tools.logs.app import search_log
-from monix.tools.logs.docker import (
-    follow_container,
-    list_containers,
-    search_container,
-    tail_container,
-)
-from monix.tools.logs.app import follow_log
 
 HELP = """Commands:
-  /stat [cpu|memory|disk|swap|net|io]  Snapshot (all if no metric provided)
-  /watch [cpu|memory|disk|swap|net|io] [seconds]  Real-time monitoring (default 5s, Ctrl-C to stop)
+  /stat [cpu|memory|disk|swap|net|io]  Snapshot or history view (Type /stat for details)
+  /watch [cpu|memory|disk|swap|net|io] [sec]  Real-time monitoring (Type /watch for details)
+  /collect list                    Show collector configuration
+  /collect set <interval> <retention> <folder>  Configure collector
+  /collect remove                  Disable and remove collector
   /log add @alias -app <path>      Register app log
   /log add @alias -nginx <path>    Register Nginx log
   /log add @alias -docker <name>   Register Docker container log
@@ -99,6 +109,42 @@ You can also ask in natural language:
 
 _HISTORY: list[str] = []
 
+_collector_stop: threading.Event = threading.Event()
+_collector_thread: threading.Thread | None = None
+
+
+def _start_collector(cfg: CollectorConfig) -> None:
+    global _collector_thread, _collector_stop
+    _collector_stop.set()
+    _collector_stop = threading.Event()
+    stop = _collector_stop
+    interval_sec = cfg.interval_days * 86400
+
+    def _run() -> None:
+        while True:
+            try:
+                collect_and_save(cfg.folder)
+                if cfg.retention_days > 0:
+                    purge_old_files(cfg.folder, cfg.retention_days)
+            except Exception:
+                pass
+            if stop.wait(interval_sec):
+                break
+
+    _collector_thread = threading.Thread(target=_run, daemon=True, name="monix-collector")
+    _collector_thread.start()
+
+
+def _is_panel_output(text: str) -> bool:
+    """Detect if the output is a box-drawing panel (skips render_reply)."""
+    s = text.lstrip("\n")
+    while s.startswith("\033["):
+        end = s.find("m")
+        if end == -1:
+            break
+        s = s[end + 1:]
+    return s.startswith("┌")
+
 
 def _read_line(prompt_str: str) -> str:
     """Read one line from raw TTY.
@@ -122,8 +168,6 @@ def _read_line(prompt_str: str) -> str:
         return input(prompt_str)
 
     # Emit the prompt's leading newlines (and the prompt itself) exactly once.
-    # _redraw uses the newline-stripped variant so it doesn't scroll the
-    # terminal one row per keystroke.
     sys.stdout.write(prompt_str)
     sys.stdout.flush()
     prompt_line = prompt_str.lstrip("\n")
@@ -153,16 +197,81 @@ def _read_line(prompt_str: str) -> str:
 
     try:
         while True:
-            b = os.read(fd, 8)
-            if not b:
-                break
+            b = sys.stdin.buffer.read(1)
+            if not b:   # EOF
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                raise EOFError
 
-            # ── Special keys (Esc sequences) ──────────────────────────────────
-            if b.startswith(b"\x1b"):
-                if b == b"\x1b":  # Bare Esc
-                    continue
-                if b.startswith(b"\x1b["):
-                    b3 = b[2:3]
+            # ── Enter ────────────────────────────────────────────────
+            if b in (b"\r", b"\n"):
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                return "".join(buf)
+
+            # ── Ctrl-C ───────────────────────────────────────────────
+            if b == b"\x03":
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                raise KeyboardInterrupt
+
+            # ── Ctrl-D ───────────────────────────────────────────────
+            if b == b"\x04":
+                if not buf:
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    raise EOFError
+                continue
+
+            # ── Backspace ────────────────────────────────────────────
+            if b == b"\x7f":
+                if cursor_pos > 0:
+                    buf.pop(cursor_pos - 1)
+                    cursor_pos -= 1
+                    _redraw()
+                continue
+
+            # ── Readline shortcuts ───────────────────────────────────
+            if b == b"\x01":   # Ctrl-A
+                cursor_pos = 0
+                _redraw()
+                continue
+            if b == b"\x05":   # Ctrl-E
+                cursor_pos = len(buf)
+                _redraw()
+                continue
+            if b == b"\x0b":   # Ctrl-K
+                del buf[cursor_pos:]
+                _redraw()
+                continue
+            if b == b"\x15":   # Ctrl-U
+                buf.clear()
+                cursor_pos = 0
+                _redraw()
+                continue
+            if b == b"\x17":   # Ctrl-W
+                while cursor_pos > 0 and buf[cursor_pos - 1] == " ":
+                    buf.pop(cursor_pos - 1)
+                    cursor_pos -= 1
+                while cursor_pos > 0 and buf[cursor_pos - 1] != " ":
+                    buf.pop(cursor_pos - 1)
+                    cursor_pos -= 1
+                _redraw()
+                continue
+            if b == b"\x0c":  # Ctrl-L
+                sys.stdout.write(clear_screen())
+                _redraw()
+                continue
+
+            # ── Escape sequences (arrows, home, end, delete) ──────────
+            if b == b"\x1b":
+                b2 = sys.stdin.buffer.read(1)
+                if not b2:
+                    raise EOFError
+                if b2 == b"[":
+                    b3 = sys.stdin.buffer.read(1)
+                    if not b3:
+                        raise EOFError
                     if b3 == b"A":    # Up — previous history
                         if _HISTORY:
                             hist_pos = max(0, hist_pos - 1)
@@ -194,8 +303,13 @@ def _read_line(prompt_str: str) -> str:
                         cursor_pos = len(buf)
                         _redraw()
                     elif b3.isdigit():
-                        # Consume \x1b[{number}~ or \x1b[{number};…{letter}
-                        seq = b[2:]
+                        # \x1b[{number}~ or \x1b[{number};…{letter}
+                        seq = b3
+                        while not (seq[-1:].isalpha() or seq.endswith(b"~")):
+                            chunk = sys.stdin.buffer.read(1)
+                            if not chunk:
+                                raise EOFError
+                            seq += chunk
                         if seq == b"3~" and cursor_pos < len(buf):   # Delete
                             buf.pop(cursor_pos)
                             _redraw()
@@ -205,81 +319,24 @@ def _read_line(prompt_str: str) -> str:
                         elif seq in (b"4~", b"8~"):   # End variants
                             cursor_pos = len(buf)
                             _redraw()
-                        # Others (\x1b[1;2C etc.) are consumed and ignored
                 continue
 
-            # ── Control characters ───────────────────────────────────────────
-            if b == b"\r" or b == b"\n":
-                sys.stdout.write("\n")
-                sys.stdout.flush()
-                return "".join(buf)
-            if b == b"\x7f" or b == b"\x08":  # Backspace
-                if cursor_pos > 0:
-                    buf.pop(cursor_pos - 1)
-                    cursor_pos -= 1
-                    _redraw()
-                continue
-            if b == b"\x03":  # Ctrl-C
-                sys.stdout.write("^C\n")
-                sys.stdout.flush()
-                raise KeyboardInterrupt
-            if b == b"\x04":  # Ctrl-D
-                if not buf:
-                    sys.stdout.write("\n")
-                    sys.stdout.flush()
-                    return "/exit"
-                continue
-            if b == b"\x01":  # Ctrl-A (Home)
-                cursor_pos = 0
-                _redraw()
-                continue
-            if b == b"\x05":  # Ctrl-E (End)
-                cursor_pos = len(buf)
-                _redraw()
-                continue
-            if b == b"\x0b":  # Ctrl-K (Kill line after cursor)
-                buf = buf[:cursor_pos]
-                _redraw()
-                continue
-            if b == b"\x15":  # Ctrl-U (Kill line before cursor)
-                buf = buf[cursor_pos:]
-                cursor_pos = 0
-                _redraw()
-                continue
-            if b == b"\x17":  # Ctrl-W (Delete last word)
-                if cursor_pos > 0:
-                    i = cursor_pos - 1
-                    while i > 0 and buf[i] == " ":
-                        i -= 1
-                    while i > 0 and buf[i] != " ":
-                        i -= 1
-                    start = i + 1 if buf[i] == " " else i
-                    del buf[start:cursor_pos]
-                    cursor_pos = start
-                    _redraw()
-                continue
-            if b == b"\x0c":  # Ctrl-L (Clear screen)
-                sys.stdout.write(clear_screen())
-                _redraw()
-                continue
-
-            # ── '/' first char → Live Picker ───────────────────────────
+            # ── Live Picker Trigger ──────────────────────────────────
             if b == b"/" and not buf:
                 _T.tcsetattr(fd, _T.TCSADRAIN, saved)
-                # Pass prompt_line to picker so filter is shown inline
-                from monix.picker import live_picker
-                choice = live_picker(prompt_line=prompt_str.strip())
+                result = pick_with_filter(prompt_line)
+                if result:
+                    sys.stdout.write(f"\r\033[K{prompt_line}{result}\n")
+                    sys.stdout.flush()
+                    return result
+                # Picker cancelled
+                sys.stdout.write(f"\r\033[K{prompt_line}")
+                sys.stdout.flush()
                 _tty.setraw(fd)
                 _redraw()
-                if choice:
-                    # Clear line and return choice immediately
-                    sys.stdout.write("\r\x1b[K")
-                    sys.stdout.write(prompt_str + choice + "\n")
-                    sys.stdout.flush()
-                    return choice
                 continue
 
-            # ── Normal characters (including Multi-byte UTF-8) ───────────────────
+            # ── Normal characters (including Multi-byte UTF-8) ────────
             pending.extend(b)
             while pending:
                 try:
@@ -290,9 +347,17 @@ def _read_line(prompt_str: str) -> str:
                         cursor_pos += 1
                         _redraw()
                     break
-                except UnicodeDecodeError:
+                except UnicodeDecodeError as exc:
                     # Incomplete multi-byte sequence → read more bytes
-                    break
+                    if exc.reason == "unexpected end of data" and len(pending) < 4:
+                        chunk = sys.stdin.buffer.read(1)
+                        if not chunk:
+                            pending.clear()
+                            raise EOFError
+                        pending.extend(chunk)
+                    else:
+                        pending.clear()
+                        break
 
     finally:
         _T.tcsetattr(fd, _T.TCSADRAIN, saved)
@@ -367,6 +432,9 @@ def repl(settings: Settings | None = None) -> int:
     if not settings.gemini_api_key:
         settings = _prompt_api_key_setup(settings)
     history: list[dict] = []
+    cfg = load_collector_config()
+    if cfg:
+        _start_collector(cfg)
     print(clear_screen(), end="")
     print(render_welcome(collect_snapshot(settings), bool(settings.gemini_api_key)))
 
@@ -389,7 +457,10 @@ def repl(settings: Settings | None = None) -> int:
         except Exception as exc:
             output = f"Error: {exc}"
         if output:
-            print(render_reply(output))
+            if _is_panel_output(output):
+                print("\n" + output)
+            else:
+                print(render_reply(output))
         if raw:
             _HISTORY.append(raw)
             if len(_HISTORY) > 100:
@@ -415,8 +486,8 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             history.clear()
         return "Conversation history cleared. Let's start a new one!"
     if command == "/stat":
-        metric = args[0] if args else None
-        return stat(settings, metric)
+        metric, period = _stat_args(args)
+        return stat(settings, metric, period)
     if command == "/cpu":
         return render_cpu(cpu_usage_percent(), load_average())
     if command == "/memory":
@@ -431,7 +502,7 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         return render_disk_io(disk_io())
     if command == "/watch":
         interval, metric = _watch_args(args)
-        return watch(interval, settings, metric)
+        return watch(interval, settings, metric or None)
     if command == "/top":
         limit = _int_arg(args, 0, 10)
         procs = _run_with_indicator("top_processes", top_processes, limit)
@@ -467,6 +538,8 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             return "Usage: /ask <question>"
         with Spinner("Asking Gemini..."):
             return answer(" ".join(args), settings, history)
+    if command == "/collect":
+        return _dispatch_collect(args)
     return f"Unknown command: {command}\nType /help to see available commands."
 
 
@@ -486,8 +559,8 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
                     return answer(raw, settings, history)
             if bare:
                 return (
-                    f"@{alias} 에 대해 무엇을 도와드릴까요?\n"
-                    f"  예: @{alias} 에러 확인 / @{alias} 마지막 50줄 보여줘"
+                    f"How can I help with @{alias}?\n"
+                    f"  e.g.: check errors in @{alias} / show last 50 lines of @{alias}"
                 )
         return _log_search_natural(alias, raw)
 
@@ -511,28 +584,109 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
     return local_answer(raw)
 
 
+_METRICS = {"cpu", "memory", "mem", "disk", "swap", "net", "network", "io"}
+
+_STAT_HELP = (
+    "Available metrics:\n"
+    "  /stat all              Current full snapshot\n"
+    "  /stat cpu              CPU + Load avg\n"
+    "  /stat memory           Memory\n"
+    "  /stat disk             Disk\n"
+    "  /stat swap             Swap\n"
+    "  /stat net              Network I/O\n"
+    "  /stat io               Disk I/O\n"
+    "\n"
+    "Provide a period to view collected history:\n"
+    "  /stat all 1d           History for last 1 day\n"
+    "  /stat cpu 24h          History for last 24 hours\n"
+    "  /stat all 2026-04-25   Specific date\n"
+    "  /stat cpu 2026-04-24~2026-04-26  Date range"
+)
+
+_WATCH_HELP = (
+    "Available metrics:\n"
+    "  /watch all             Real-time full dashboard\n"
+    "  /watch cpu             Real-time CPU\n"
+    "  /watch memory          Real-time memory\n"
+    "  /watch disk            Real-time disk\n"
+    "  /watch swap            Real-time swap\n"
+    "  /watch net             Real-time network I/O\n"
+    "  /watch io              Real-time disk I/O\n"
+    "\n"
+    "  Update interval (sec) can be added at the end:\n"
+    "  /watch cpu 10          Update CPU every 10 seconds"
+)
+
+
+def _stat_args(args: list[str]) -> tuple[str | None, str | None]:
+    metric = None
+    period = None
+    for a in args:
+        if a.lower() == "all":
+            metric = "all"
+        elif a.lower() in _METRICS:
+            metric = a.lower()
+        else:
+            period = a
+    return metric, period
+
+
+def _parse_period(s: str):
+    import re
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    if "~" in s:
+        left, right = s.split("~", 1)
+        start = datetime.strptime(left.strip(), "%Y-%m-%d")
+        end = datetime.strptime(right.strip(), "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        return start, end, f"{left.strip()} ~ {right.strip()}"
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        start = datetime.strptime(s, "%Y-%m-%d")
+        end = start.replace(hour=23, minute=59, second=59)
+        return start, end, s
+    days = _parse_duration_days(s)
+    return now - timedelta(days=days), now, f"last {_fmt_duration(days)}"
+
+
 def watch(interval: int, settings: Settings | None = None, metric: str | None = None) -> str:
+    if not metric:
+        return _WATCH_HELP
     settings = settings or Settings.from_env()
-    interval = max(interval, 2)
+    interval = max(interval, 1)
+    show_all = metric == "all"
     try:
         while True:
             print("\033[2J\033[H", end="")
-            if metric:
-                print(_stat_single(metric, settings))
+            if show_all:
+                print(_stat_all(settings))
             else:
-                print(render_snapshot(collect_snapshot(settings)))
-            label = f"  [{metric}]" if metric else ""
-            print(f"\nRefreshing every {interval}s{label}. Press Ctrl-C to stop.")
+                print(_stat_single(metric, settings))
+            print(f"\n  [{metric}]  Refreshing every {interval}s. Ctrl-C to stop.")
             time.sleep(interval)
     except KeyboardInterrupt:
         return "watch stopped."
 
 
-def stat(settings: Settings | None = None, metric: str | None = None) -> str:
+def stat(settings: Settings | None = None, metric: str | None = None, period: str | None = None) -> str:
+    if not metric:
+        return _STAT_HELP
     settings = settings or Settings.from_env()
-    if metric:
-        return _stat_single(metric, settings)
-    return render_snapshot(collect_snapshot(settings))
+    if period:
+        return _stat_history(None if metric == "all" else metric, period)
+    if metric == "all":
+        return _stat_all(settings)
+    return _stat_single(metric, settings)
+
+
+def _stat_all(settings: Settings) -> str:
+    return "\n".join([
+        render_cpu(cpu_usage_percent(), load_average()),
+        render_memory(memory_info()),
+        render_disk(disk_info()),
+        render_swap(swap_info()),
+        render_network(network_io()),
+        render_disk_io(disk_io()),
+    ])
 
 
 def _stat_single(metric: str, settings: Settings) -> str:
@@ -549,17 +703,33 @@ def _stat_single(metric: str, settings: Settings) -> str:
         return render_network(network_io())
     if m == "io":
         return render_disk_io(disk_io())
-    return f"Unknown metric: {metric}\nAvailable: cpu, memory, disk, swap, net, io"
+    return f"Unknown metric: {metric}\nAvailable: all, cpu, memory, disk, swap, net, io"
+
+
+def _stat_history(metric: str | None, period: str) -> str:
+    cfg = load_collector_config()
+    if not cfg:
+        return "Collector is not configured.\nSet up with /collect set to start gathering data."
+    try:
+        start, end, label = _parse_period(period)
+    except ValueError:
+        return f"Invalid period format: {period}\nExamples: 1d, 24h, 2026-04-25, 2026-04-24~2026-04-26"
+    records = load_history(cfg.folder, start, end)
+    return render_history(records, metric, label)
 
 
 def _watch_args(args: list[str]) -> tuple[int, str | None]:
     interval = 5
     metric = None
     for a in args:
-        if a.isdigit():
-            interval = int(a)
+        al = a.lower()
+        if al == "all" or al in _METRICS:
+            metric = al
         else:
-            metric = a
+            try:
+                interval = int(a)
+            except ValueError:
+                pass
     return interval, metric
 
 
@@ -693,11 +863,7 @@ def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG00
 
 
 def _resolve_docker_container(name: str) -> tuple[str, str | None]:
-    """Return (container_name, None) or ("", error_message).
-
-    If name starts with '@', looks up the alias in registry and returns its
-    container. Otherwise passes the name through unchanged.
-    """
+    """Return (container_name, None) or ("", error_message)."""
     if not name.startswith("@"):
         return name, None
     alias = name[1:]
@@ -762,7 +928,7 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
 
     sub = args[0]
 
-    # Direct path: "/log /path/to/file" or "/log @/path/to/file" or "/log ~/path"
+    # Direct path lookup
     raw_path: str | None = None
     if sub.startswith("@"):
         alias = sub[1:]
@@ -796,7 +962,6 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
             if entry.type == "docker":
                 return render_logs(tail_container(entry.container or "", n))
             if entry.type == "nginx":
-                from monix.tools.logs.nginx import tail_nginx_access
                 return render_nginx_summary(tail_nginx_access(entry.path or "", n))
             return render_logs(tail_log(entry.path or "", n))
     elif sub.startswith("/") or sub.startswith("~"):
@@ -934,10 +1099,7 @@ def _get_opt(args: list[str], flag: str, default: int) -> int:
 
 
 def _validate_flags(args: list[str], allowed: frozenset[str], usage: str) -> str | None:
-    """Return an error message if args contain any flag not in `allowed`, else None.
-
-    Skips the value token after -n and after --search (when the value doesn't start with -).
-    """
+    """Return an error message if args contain any flag not in `allowed`, else None."""
     i = 0
     while i < len(args):
         token = args[i]
@@ -1058,11 +1220,7 @@ def _is_natural_question(text: str) -> bool:
 
 
 def _extract_search_pattern(text: str, alias: str) -> str | None:
-    """Extract explicit search keyword from natural language.
-
-    Looks for quoted strings first, explicit @alias:pattern syntax next,
-    then alphanumeric tokens that survive stopword filtering.
-    """
+    """Extract explicit search keyword from natural language."""
     import re as _re
 
     # 1. Quoted pattern: "timeout" or 'OOM'
@@ -1142,7 +1300,6 @@ def _log_search_natural(alias: str, text: str) -> str:
         if entry.type == "docker":
             return render_logs(tail_container(entry.container or "", n))
         if entry.type == "nginx":
-            from monix.tools.logs.nginx import tail_nginx_access
             return render_nginx_summary(tail_nginx_access(entry.path or "", n))
         return render_logs(tail_log(entry.path or "", n))
 
@@ -1151,6 +1308,93 @@ def _log_search_natural(alias: str, text: str) -> str:
     tokens = {t.strip("@.,?!:;").lower() for t in text.split()}
     scan_lines = 999999 if tokens & _ALL_LINES_KEYWORDS else 2000
     return _log_search_entry(entry, pattern, lines=scan_lines)
+
+
+def _parse_duration_days(s: str) -> float:
+    """Convert '30s', '5m', '2h', '1d' to float days."""
+    s = s.strip().lower()
+    _units = {"s": 1 / 86400, "m": 1 / 1440, "h": 1 / 24, "d": 1.0}
+    for suffix, factor in _units.items():
+        if s.endswith(suffix):
+            return float(s[:-1]) * factor
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _fmt_duration(days: float) -> str:
+    """Format float days to a human-readable string."""
+    seconds = days * 86400
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{seconds / 60:.0f}m"
+    if seconds < 86400:
+        return f"{seconds / 3600:.1f}h"
+    return f"{days:.1f}d"
+
+
+def _dispatch_collect(args: list[str]) -> str:
+    if not args:
+        return (
+            "Collector commands:\n"
+            "  /collect list                    Show current configuration\n"
+            "  /collect set <interval> <retention> <folder>  Set/Update collector\n"
+            "  /collect remove                  Disable and remove collector\n"
+            "\n"
+            "  Units: s(sec), m(min), h(hour), d(day) — default is d\n"
+            "  e.g.) /collect set 1h 30d /path/to/folder"
+        )
+
+    sub = args[0]
+
+    if sub == "list":
+        cfg = load_collector_config()
+        if not cfg:
+            return "Collector is not configured. Use /collect set to configure."
+        active = _collector_thread is not None and _collector_thread.is_alive()
+        status = "Active" if active else "Stopped"
+        return (
+            f"Collector configuration [{status}]\n"
+            f"  Interval:   {_fmt_duration(cfg.interval_days)}\n"
+            f"  Retention:  {_fmt_duration(cfg.retention_days)}\n"
+            f"  Storage:    {cfg.folder}"
+        )
+
+    if sub == "set":
+        rest = args[1:]
+        if len(rest) < 3:
+            return (
+                "Usage: /collect set <interval> <retention> <folder>\n"
+                "  e.g.) /collect set 1h 30d /path/to/folder"
+            )
+        try:
+            interval = _parse_duration_days(rest[0])
+            retention = _parse_duration_days(rest[1])
+        except ValueError:
+            return "Invalid interval or retention values.\n  e.g.) /collect set 1h 30d /path/to/folder"
+        if interval <= 0 or retention <= 0:
+            return "Interval and retention must be greater than 0."
+        folder = rest[2]
+        cfg = CollectorConfig(interval_days=interval, retention_days=retention, folder=folder)
+        save_collector_config(cfg)
+        _start_collector(cfg)
+        return (
+            f"Collector configured and started\n"
+            f"  Interval:   {_fmt_duration(interval)}\n"
+            f"  Retention:  {_fmt_duration(retention)}\n"
+            f"  Storage:    {folder}"
+        )
+
+    if sub == "remove":
+        from monix.tools.collect import CONFIG_PATH
+        _collector_stop.set()
+        if CONFIG_PATH.exists():
+            CONFIG_PATH.unlink()
+        return "Collector configuration removed."
+
+    return f"Unknown subcommand: {sub}\nType /collect to see available commands."
 
 
 if __name__ == "__main__":

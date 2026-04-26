@@ -229,13 +229,22 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
 
         while True:
             b = sys.stdin.buffer.read(1)
+            if not b:   # 실제 EOF
+                _clear()
+                return None
 
             # ── Escape Sequences ──────────────────────────────────────
             if b == b"\x1b":
                 b2 = sys.stdin.buffer.read(1)
+                if not b2:
+                    _clear()
+                    return None
                 if b2 == b"[":
                     b3 = sys.stdin.buffer.read(1)
-                    if b3 == b"A":    # Up -> Prev item
+                    if not b3:
+                        _clear()
+                        return None
+                    if b3 == b"A":    # 위 → 목록 위로
                         n = max(len(_items()), 1)
                         idx = (idx - 1) % n
                     elif b3 == b"B":  # Down -> Next item
@@ -254,8 +263,12 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
                     elif b3.isdigit():
                         seq = b3
                         while not (seq[-1:].isalpha() or seq.endswith(b"~")):
-                            seq += sys.stdin.buffer.read(1)
-                        if seq == b"3~" and q_cursor < len(query_buf):  # Delete
+                            chunk = sys.stdin.buffer.read(1)
+                            if not chunk:
+                                _clear()
+                                return None
+                            seq += chunk
+                        if seq == b"3~" and q_cursor < len(query_buf):
                             query_buf.pop(q_cursor)
                             idx = 0
                         elif seq in (b"1~", b"7~"):  # Home
@@ -313,7 +326,12 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
                         break
                     except UnicodeDecodeError as exc:
                         if exc.reason == "unexpected end of data" and len(pending) < 4:
-                            pending.extend(sys.stdin.buffer.read(1))
+                            chunk = sys.stdin.buffer.read(1)
+                            if not chunk:
+                                pending.clear()
+                                _clear()
+                                return None
+                            pending.extend(chunk)
                         else:
                             pending.clear()
                             break
