@@ -5,6 +5,7 @@ import textwrap
 
 from monix.config import Settings
 from monix.llm.gemini import GeminiClient
+from monix.llm.types import LLMError
 from monix.tools.calling import TOOL_DECLARATIONS, call_tool
 from monix.tools.logs import registry
 from monix.tools.system import collect_snapshot, human_bytes
@@ -38,31 +39,50 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
         # working copy of history for this agentic loop — never mutate history directly
         working: list[dict] = list((history or [])[-_MAX_HISTORY:]) + [user_msg]
 
-        for _ in range(_MAX_TOOL_ROUNDS):
-            text, tool_calls, raw_parts = client.chat_with_tools(working, TOOL_DECLARATIONS)
+        try:
+            for _ in range(_MAX_TOOL_ROUNDS):
+                candidate, _usage = client.chat_with_tools(working, TOOL_DECLARATIONS)
+                parts = candidate.get("parts") or []
 
-            if not tool_calls:
-                # Final answer from the LLM
-                _append_to_history(history, user_msg, text)
-                return wrap(text or local_answer(question, snapshot))
+                function_calls = [
+                    p["functionCall"] for p in parts
+                    if isinstance(p, dict) and "functionCall" in p
+                ]
+                text_parts = [
+                    p["text"] for p in parts
+                    if isinstance(p, dict) and isinstance(p.get("text"), str)
+                ]
+                text = "\n".join(text_parts).strip() or None
 
-            # Append the model's turn verbatim — raw_parts preserves thought_signature
-            # and any other model-internal fields required by thinking-mode models.
-            working.append({"role": "model", "parts": raw_parts})
+                if not function_calls:
+                    _append_to_history(history, user_msg, text)
+                    return wrap(text or local_answer(question, snapshot))
 
-            # Execute every requested tool and feed results back
-            responses = []
-            for tc in tool_calls:
-                result = call_tool(tc.name, tc.args)
-                responses.append(
-                    {"functionResponse": {"name": tc.name, "response": {"result": result}}}
-                )
-            working.append({"role": "user", "parts": responses})
+                # Append candidate verbatim — preserves thought_signature for thinking models
+                working.append(candidate)
 
-        # _MAX_TOOL_ROUNDS exhausted — ask the LLM to summarise what it found
-        text, _, _ = client.chat_with_tools(working, [])
-        _append_to_history(history, user_msg, text)
-        return wrap(text or local_answer(question, snapshot))
+                responses = []
+                for fc in function_calls:
+                    fn_name = fc.get("name", "")
+                    result = call_tool(fn_name, fc.get("args") or {})
+                    responses.append(
+                        {"functionResponse": {"name": fn_name, "response": {"result": result}}}
+                    )
+                working.append({"role": "user", "parts": responses})
+
+            # _MAX_TOOL_ROUNDS exhausted — ask the LLM to summarise what it found
+            candidate, _usage = client.chat_with_tools(working, [])
+            parts = candidate.get("parts") or []
+            text_parts = [
+                p["text"] for p in parts
+                if isinstance(p, dict) and isinstance(p.get("text"), str)
+            ]
+            text = "\n".join(text_parts).strip() or None
+            _append_to_history(history, user_msg, text)
+            return wrap(text or local_answer(question, snapshot))
+
+        except LLMError as exc:
+            return wrap(f"Gemini API 오류: {exc.message}\n\n{local_answer(question, snapshot)}")
 
     return wrap(local_answer(question, snapshot))
 
@@ -72,7 +92,7 @@ def _append_to_history(
     user_msg: dict,
     model_text: str | None,
 ) -> None:
-    if history is None or not model_text or model_text.startswith("Gemini API"):
+    if history is None or not model_text:
         return
     history.append(user_msg)
     history.append({"role": "model", "parts": [{"text": model_text}]})
