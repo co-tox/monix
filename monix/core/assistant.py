@@ -6,12 +6,25 @@ import textwrap
 from monix.config import Settings
 from monix.llm.gemini import GeminiClient
 from monix.llm.types import LLMError
+from monix.render import render_docker_containers, render_log_search, render_logs, render_nginx_summary, render_service
 from monix.tools.calling import TOOL_DECLARATIONS, call_tool
 from monix.tools.logs import registry
 from monix.tools.system import collect_snapshot, human_bytes
 
 _MAX_HISTORY = 20   # keep last 20 messages (~10 turns)
 _MAX_TOOL_ROUNDS = 5  # max tool-call iterations per query to prevent infinite loops
+
+# Tools whose results should be rendered directly with Rich rather than
+# passed back to the LLM for text-formatting.
+_RENDER_MAP: dict[str, object] = {
+    "tail_log": render_logs,
+    "tail_container": render_logs,
+    "search_log": render_log_search,
+    "search_container": render_log_search,
+    "tail_nginx_access": render_nginx_summary,
+    "list_containers": render_docker_containers,
+    "service_status": render_service,
+}
 
 
 def answer(question: str | list[str], settings: Settings | None = None, history: list[dict] | None = None) -> str:
@@ -62,12 +75,28 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
                 working.append(candidate)
 
                 responses = []
+                renderable: tuple[str, object] | None = None
                 for fc in function_calls:
                     fn_name = fc.get("name", "")
                     result = call_tool(fn_name, fc.get("args") or {})
                     responses.append(
                         {"functionResponse": {"name": fn_name, "response": {"result": result}}}
                     )
+                    # Track the first renderable tool result in this round
+                    if renderable is None and fn_name in _RENDER_MAP:
+                        renderable = (fn_name, result)
+
+                # If exactly one render-capable tool was called this round, render
+                # and return immediately — no need for the LLM to describe the output.
+                render_calls = [fc for fc in function_calls if fc.get("name") in _RENDER_MAP]
+                if len(render_calls) == 1 and renderable:
+                    fn_name, raw = renderable
+                    try:
+                        result_dict = json.loads(raw)
+                        return _RENDER_MAP[fn_name](result_dict)  # type: ignore[operator]
+                    except Exception:
+                        pass  # fall through to LLM text path
+
                 working.append({"role": "user", "parts": responses})
 
             # _MAX_TOOL_ROUNDS exhausted — ask the LLM to summarise what it found

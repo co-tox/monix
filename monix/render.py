@@ -62,7 +62,7 @@ def render_welcome(snapshot: dict, gemini_enabled: bool) -> str:
         _line("Status", alert_text, inner),
         _rule(width, "mid"),
         _text(f"{style('Ask me anything!', 'bold')}  Check CPU    Why is nginx slow?    Memory analysis", inner),
-        _text(f"{style('/help', 'cyan')} Commands   {style('/clear', 'cyan')} Clear history   {style('/watch 5', 'cyan')} Real-time   {style('/exit', 'cyan')} Exit", inner),
+        _text(f"{style('/help', 'cyan')} Commands   {style('/clear', 'cyan')} Clear history   {style('/watch cpu', 'cyan')} Real-time   {style('/exit', 'cyan')} Exit", inner),
         _rule(width, "bottom"),
     ]
     return "\n".join(lines)

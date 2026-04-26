@@ -566,23 +566,18 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
     # Detect natural language log search via @alias mention
     alias = _detect_log_alias(raw)
     if alias:
-        bare = _is_bare_alias_input(raw, alias)
-        question = _is_natural_question(raw)
-        tokens = {t.strip("@.,?!:;").lower() for t in raw.split()}
-        # Fast-path only when a clear error or tail keyword is present.
-        # Everything else (search verbs, free-form English/Korean, questions)
-        # goes to the LLM which can call the right tool with proper arguments.
-        has_clear_intent = bool(tokens & (_ERROR_INTENTS | _TAIL_INTENTS))
-
-        if bare or question or not has_clear_intent:
-            if settings.gemini_enabled:
-                with Spinner("Asking Gemini..."):
-                    return answer(raw, settings, history)
-            if bare:
-                return (
-                    f"@{alias} 에 대해 무엇을 도와드릴까요?\n"
-                    f"  예: @{alias} 에러 확인 / @{alias} 마지막 50줄 보여줘"
-                )
+        # Always let the LLM handle @alias queries when Gemini is enabled:
+        # it understands intent (tail/search/errors) and calls the right tool,
+        # and assistant.py renders the result with the same Rich panels as the
+        # local path. Only fall back to local logic when Gemini is unavailable.
+        if settings.gemini_enabled:
+            with Spinner("Asking Gemini..."):
+                return answer(raw, settings, history)
+        if _is_bare_alias_input(raw, alias):
+            return (
+                f"@{alias} 에 대해 무엇을 도와드릴까요?\n"
+                f"  예: @{alias} 에러 확인 / @{alias} 마지막 50줄 보여줘"
+            )
         return _log_search_natural(alias, raw)
 
     # Route all natural language to AI if Gemini is enabled
