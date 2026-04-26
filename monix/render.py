@@ -47,8 +47,8 @@ def render_welcome(snapshot: dict, gemini_enabled: bool) -> str:
         _line("Load", _load(snapshot.get("load_average")), inner),
         _line("Status", alert_text, inner),
         _rule(width, "mid"),
-        _text(f"{style('뭐든 물어봐!', 'bold')}  CPU 상태 봐줘    nginx 왜 느려?    메모리 분석해줘", inner),
-        _text(f"{style('/help', 'cyan')} 명령 목록   {style('/clear', 'cyan')} 대화 초기화   {style('/watch 5', 'cyan')} 실시간   {style('/exit', 'cyan')} 종료", inner),
+        _text(f"{style('Ask me anything!', 'bold')}  CPU 상태 봐줘    nginx 왜 느려?    Memory analysis", inner),
+        _text(f"{style('/help', 'cyan')} Commands   {style('/clear', 'cyan')} Clear history   {style('/watch 5', 'cyan')} Real-time   {style('/exit', 'cyan')} Exit", inner),
         _rule(width, "bottom"),
     ]
     return "\n".join(lines)
@@ -215,18 +215,18 @@ def render_logs(result: dict) -> str:
 
 def render_log_list(entries: list) -> str:
     if not entries:
-        return "등록된 로그가 없습니다.\n  /log add @alias -app /path/to/file 로 등록하세요."
+        return "No logs registered. / 등록된 로그가 없습니다.\n  Register with: /log add @alias -app /path/to/file"
     rows = [style(f"{'ALIAS':<22} {'TYPE':<8} PATH / CONTAINER", "bold")]
     for e in entries:
-        target = e.path or e.container or "(없음)"
+        target = e.path or e.container or "(none)"
         rows.append(f"@{e.alias:<21} {e.type:<8} {target}")
     return "\n".join(rows)
 
 
 def render_log_aliases(alias_list: list[str]) -> str:
     if not alias_list:
-        return "등록된 로그가 없습니다. /log add 로 등록하세요."
-    return "\n".join(["등록된 로그 (alias):", *(f"  @{a}" for a in alias_list)])
+        return "No logs registered. Register with /log add."
+    return "\n".join(["Registered log aliases:", *(f"  @{a}" for a in alias_list)])
 
 
 def colorize_log_line(line: str) -> str:
@@ -235,6 +235,124 @@ def colorize_log_line(line: str) -> str:
     if _LOG_WARN_RE.search(line):
         return style(line, "yellow")
     return line
+
+
+def render_log_search(result: dict) -> str:
+    path = result["path"]
+    status = result["status"]
+
+    if status != "ok":
+        return f"Log Search: {path} {badge(status, 'red')}"
+
+    query = result.get("query")
+    total = result.get("total_scanned", 0)
+    matches: list[dict] = result.get("matches", [])
+
+    query_label = f'Pattern "{query}"' if query else "에러/경고"
+    error_count = sum(1 for m in matches if m["severity"] == "error")
+    warn_count = sum(1 for m in matches if m["severity"] == "warn")
+    found_color = "red" if error_count else "yellow" if warn_count else "green"
+    found_text = f"{len(matches)} found" if matches else "Healthy"
+
+    lines = [
+        f"Log: {path}",
+        f"{style(query_label, 'cyan')} Search — scanned {total:,} lines  {badge(found_text, found_color)}",
+    ]
+
+    if not matches:
+        return "\n".join(lines)
+
+    lines.append("")
+    for m in matches:
+        color = "red" if m["severity"] == "error" else "yellow"
+        lineno_str = f"L{m['lineno']:>5}"
+        lines.append(f"  {style(lineno_str, 'muted')}  {style(m['line'], color)}")
+
+    lines += [
+        "",
+        f"  Error {style(str(error_count), 'red' if error_count else 'green')}  "
+        f"Warn {style(str(warn_count), 'yellow' if warn_count else 'green')}",
+    ]
+    return "\n".join(lines)
+
+
+def render_nginx_summary(result: dict) -> str:
+    if result["status"] != "ok":
+        return render_logs(result)
+
+    summary = result.get("summary") or {}
+    header = f"Log: {result['path']} {badge('ok', 'green')}"
+
+    total = summary.get("total", 0)
+    if total == 0:
+        return "\n".join([header, "", "No parsed lines. / 파싱된 라인이 없습니다."])
+
+    lines = [
+        header,
+        "",
+        f"{style('Nginx Access Log Summary', 'bold')} — total {total:,}",
+        "",
+        style("Status Codes:", "cyan"),
+    ]
+
+    status_dist: dict = summary.get("status_dist", {})
+    for code in sorted(status_dist):
+        count = status_dist[code]
+        pct = count / total * 100
+        color = "green" if code < 400 else "yellow" if code < 500 else "red"
+        lines.append(f"  {style(str(code), color)}   {count:>6,}  ({pct:.1f}%)")
+
+    top_paths: list = summary.get("top_paths", [])
+    if top_paths:
+        lines += ["", style("Top Paths (Top 10):", "cyan")]
+        for path, count in top_paths:
+            lines.append(f"  {path:<40} {count:>6,}")
+
+    top_ips: list = summary.get("top_ips", [])
+    if top_ips:
+        lines += ["", style("Top IPs (Top 10):", "cyan")]
+        for ip, count in top_ips:
+            lines.append(f"  {ip:<30} {count:>6,}")
+
+    error_count = len(summary.get("error_lines", []))
+    lines += ["", f"Errors (4xx/5xx): {style(str(error_count), 'red' if error_count else 'green')}"]
+
+    return "\n".join(lines)
+
+
+def render_docker_containers(containers: list) -> str:
+    if not containers:
+        return "No running containers found. / 실행 중인 컨테이너가 없습니다."
+
+    rows = [
+        style(f"  {'NAME':<22} {'STATUS':<22} IMAGE", "bold"),
+    ]
+    for c in containers:
+        rows.append(f"  {c['name']:<22} {c['status']:<22} {c['image']}")
+
+    hints = ["", style("Registration Commands:", "cyan")]
+    for c in containers:
+        name = c["name"]
+        hints.append(f"  /docker add @{name:<16} {name}")
+
+    return "\n".join(["Running Docker Containers", "", *rows, *hints])
+
+
+def render_docker_aliases(entries: list) -> str:
+    docker_entries = [e for e in entries if e.type == "docker"]
+    if not docker_entries:
+        return (
+            "등록된 Docker 컨테이너가 없습니다.\n"
+            "  /docker add @alias <container> 로 등록하세요.\n"
+            "  실행 중인 컨테이너 목록: /docker ps"
+        )
+    rows = [style(f"  {'ALIAS':<22} CONTAINER", "bold")]
+    for e in docker_entries:
+        rows.append(f"  @{e.alias:<21} {e.container or '(none)'}")
+    hints = ["", style("Commands:", "cyan")]
+    for e in docker_entries:
+        hints.append(f"  /docker @{e.alias:<18} 로그 보기  |  --live  |  --search")
+    return "\n".join(["Registered Docker Aliases", "", *rows, *hints])
 
 
 def render_service(result: dict) -> str:

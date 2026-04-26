@@ -119,7 +119,9 @@ def test_follow_log_yields_lines(tmp_path):
     mock_proc.stdout = iter(["line1\n", "line2\n"])
     with patch("monix.tools.logs.app.subprocess.Popen", return_value=mock_proc):
         lines = list(follow_log(log, initial_lines=2))
-    assert lines == ["line1", "line2"]
+    # last element is EOF sentinel (None) when tail -f exits
+    assert [l for l in lines if l is not None] == ["line1", "line2"]
+    assert lines[-1] is None
     mock_proc.terminate.assert_called_once()
 
 

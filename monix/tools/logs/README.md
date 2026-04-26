@@ -1,6 +1,9 @@
-# monix/tools/logs — 로그 모니터링 모듈
+# monix/tools/logs — Log Monitoring Module / 로그 모니터링 모듈
 
-## 개요
+## Overview / 개요
+
+A collection of tools to view and stream server application logs, Nginx logs, and Docker container logs.
+All features adhere to the **Read-only** principle and use only the Python standard library.
 
 서버 애플리케이션 로그, Nginx 로그, Docker 컨테이너 로그를 조회·스트리밍하는 도구 모음.
 모든 기능은 **읽기 전용(Read-only)** 원칙을 준수하며, Python 표준 라이브러리만 사용한다.
@@ -15,8 +18,8 @@ monix/tools/logs/
 ├── __init__.py        # 공개 API (패키지 진입점)
 ├── app.py             # 파일 기반 로그 조회·스트리밍 (Phase 1 ✅)
 ├── registry.py        # 로그 등록 영속 관리 (Phase 1 ✅)
-├── docker.py          # Docker 컨테이너 로그 래핑 (Phase 2 🔲)
-└── nginx.py           # Nginx 로그 파싱·집계 (Phase 2 🔲, 미생성)
+├── docker.py          # Docker 컨테이너 로그 래핑 (Phase 2 ✅)
+└── nginx.py           # Nginx 로그 파싱·집계 (Phase 2 ✅)
 ```
 
 ---
@@ -28,27 +31,38 @@ monix/tools/logs/
 | 함수 | 시그니처 | 설명 |
 |------|----------|------|
 | `tail_log` | `(path, lines=80) → dict` | 파일 마지막 N줄 읽기 |
+| `search_log` | `(path, pattern=None, lines=500) → dict` | 키워드 검색 또는 에러 필터링 조회 |
 | `filter_errors` | `(lines) → list[str]` | ERROR·WARN 패턴 라인만 필터 |
 | `classify_line` | `(line) → 'error'\|'warn'\|'normal'` | 단일 줄 심각도 분류 |
 | `follow_log` | `(path, initial_lines=20) → Iterator[str]` | `tail -f` 실시간 스트리밍 제너레이터 |
 
-**`tail_log` 반환 형식**
+**`search_log` 동작**
+- `pattern=None`: `classify_line`을 통해 에러/경고 줄만 추출.
+- `pattern="regex"`: 대소문자 구분 없이 정규표현식 매칭 수행.
+
+---
+
+### `nginx.py` — Nginx 로그 분석
+
+Nginx Access/Error 로그 형식을 이해하고 통계를 추출한다.
+
+| 함수 | 시그니처 | 설명 |
+|------|----------|------|
+| `tail_nginx_access` | `(path, lines=200) → dict` | Access 로그 tail 및 통계 요약 포함 |
+| `summarize_access_log` | `(lines) → dict` | 상태 코드 분포, Top Path/IP 집계 |
+| `parse_access_line` | `(line) → dict \| None` | Access 로그 한 줄 파싱 |
+| `filter_nginx_errors` | `(lines) → list[str]` | Error 로그에서 심각도(error 이상) 필터 |
+| `parse_error_line` | `(line) → dict \| None` | Error 로그 한 줄 파싱 |
+
+**Access 로그 요약 (`summarize_access_log`) 결과**
 ```python
 {
-    "path": "/var/log/app.log",
-    "status": "ok" | "missing" | "not_file" | "error",
-    "lines": ["line1", "line2", ...]
+    "total": 150,
+    "status_dist": {200: 140, 404: 8, 500: 2},
+    "top_paths": [("/api/v1/health", 50), ...],
+    "top_ips": [("127.0.0.1", 100), ...],
+    "error_lines": ["... 404 ...", "... 500 ..."]
 }
-```
-
-**에러 감지 패턴** (`_ERROR_RE`)
-```
-ERROR, FATAL, CRITICAL, Exception, Traceback  (대소문자 무관)
-```
-
-**경고 감지 패턴** (`_WARN_RE`)
-```
-WARN, WARNING  (대소문자 무관)
 ```
 
 ---
@@ -77,27 +91,9 @@ class LogEntry:
 | `get` | `(alias) → LogEntry \| None` | 단건 조회 |
 | `aliases` | `() → list[str]` | alias 이름 목록 |
 
-**저장 파일 예시** (`~/.monix/log_registry.json`)
-```json
-[
-  {
-    "alias": "api",
-    "type": "app",
-    "path": "/var/log/myapp/api.log",
-    "container": null
-  },
-  {
-    "alias": "web",
-    "type": "docker",
-    "path": null,
-    "container": "web_container"
-  }
-]
-```
-
 ---
 
-### `docker.py` — Docker 컨테이너 로그 (Phase 2)
+### `docker.py` — Docker 컨테이너 로그
 
 `docker logs` 명령을 subprocess로 래핑한다. Docker CLI가 설치된 환경에서만 동작하며,
 미설치 시 `status: error` 로 graceful 처리된다.
@@ -107,9 +103,6 @@ class LogEntry:
 | `tail_container` | `(container, lines=80) → dict` | 컨테이너 로그 마지막 N줄 |
 | `follow_container` | `(container, initial_lines=20) → Iterator[str]` | 컨테이너 로그 실시간 스트리밍 |
 | `list_containers` | `() → list[dict]` | 실행 중 컨테이너 목록 조회 |
-
-> **현재 상태**: 함수 구현 완료, CLI 명령어(`/log add @alias -docker`)와 연결됨.
-> 향후 `list_containers()`를 활용한 `/log docker-list` 명령어 추가 예정.
 
 ---
 
@@ -133,16 +126,19 @@ class LogEntry:
 /log remove @api
 ```
 
-### 로그 조회
+### 로그 조회 및 검색
 
 ```bash
 # 등록된 alias 사용
 /log @api                   # 기본 80줄
 /log @api -n 200            # 200줄
 
+# 키워드 검색 (최근 500줄 대상)
+/log @api -g "Critical"     # "Critical" 포함 라인 검색
+/log @api -g                # 패턴 없이 -g만 사용 시 에러/경고 라인 필터링
+
 # 경로 직접 지정 (등록 불필요)
 /log /var/log/app.log
-/log /var/log/app.log -n 50
 /log @/var/log/app.log -n 50   # @ 접두사도 허용
 ```
 
@@ -155,7 +151,6 @@ class LogEntry:
 
 # 경로 직접 지정
 /log /var/log/app.log --live
-/log /var/log/app.log --live -n 50
 ```
 
 > Ctrl-C 로 종료. ERROR 줄은 빨간색, WARN 줄은 노란색으로 표시된다.
@@ -168,7 +163,8 @@ class LogEntry:
 
 | 함수 | 설명 |
 |------|------|
-| `render_logs(result)` | tail_log 결과 출력 (ERROR/WARN 줄 컬러화) |
+| `render_logs(result)` | tail_log/search_log 결과 출력 (ERROR/WARN 줄 컬러화) |
+| `render_nginx_summary(summary)` | Nginx 통계(상태코드, Top Path 등) 테이블 출력 |
 | `render_log_list(entries)` | 등록 목록 테이블 출력 |
 | `render_log_aliases(aliases)` | alias 목록 출력 |
 | `colorize_log_line(line)` | 단일 줄 컬러화 (실시간 스트리밍에 사용) |
@@ -179,9 +175,6 @@ class LogEntry:
 
 | Phase | 기능 | 파일 |
 |-------|------|------|
-| 2 | Nginx Access Log 파싱 (상태코드 분포, 상위 URL) | `nginx.py` 신규 |
-| 2 | Nginx Error Log 필터링 | `nginx.py` 신규 |
-| 2 | `docker ps` 연동 컨테이너 자동 탐색 | `docker.py` 확장 |
 | 3 | 에러 패턴 집계 ("최근 10분간 DB 타임아웃 15회") | `app.py` 확장 |
 | 3 | LLM 연동 — 에러 로그 자동 요약 (`/ask` 확장) | `core/assistant.py` |
 
