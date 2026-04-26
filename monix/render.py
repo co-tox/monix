@@ -403,8 +403,6 @@ def render_log_list(entries: list) -> str:
     inner = max(width - 4, 60)
     _TC = {"app": "green", "nginx": "yellow", "docker": "cyan"}
     if not entries:
-        return "No logs registered.\n  Register with: /log add @alias -app /path/to/file"
-    rows = [style(f"{'ALIAS':<22} {'TYPE':<8} PATH / CONTAINER", "bold")]
         return "\n".join([
             _rule(width, "top"),
             _text(style("Logs", "bold"), inner),
@@ -608,10 +606,6 @@ def render_docker_containers(containers: list) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
     if not containers:
-        return "No running containers found."
-
-    rows = [
-        style(f"  {'NAME':<22} {'STATUS':<22} IMAGE", "bold"),
         return "\n".join([
             _rule(width, "top"),
             _text(style("Docker Containers", "bold"), inner),
@@ -660,18 +654,7 @@ def render_docker_aliases(entries: list) -> str:
         _text(f"{style('Docker Aliases', 'bold')}  {badge(str(len(docker_entries)) + '개', 'cyan')}", inner),
         _rule(width, "mid"),
     ]
-        return (
-            "No Docker containers registered.\n"
-            "  Register with: /docker add @alias <container>\n"
-            "  List running containers: /docker ps"
-        )
-    rows = [style(f"  {'ALIAS':<22} CONTAINER", "bold")]
     for e in docker_entries:
-        rows.append(f"  @{e.alias:<21} {e.container or '(none)'}")
-    hints = ["", style("Commands:", "cyan")]
-    for e in docker_entries:
-        hints.append(f"  /docker @{e.alias:<18} View logs  |  --live  |  --search")
-    return "\n".join(["Registered Docker Aliases", "", *rows, *hints])
         lines.append(_text(
             f"{style(f'@{e.alias:<20}', 'cyan')} {style(e.container or '(없음)', 'muted')}",
             inner,
