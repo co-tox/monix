@@ -12,10 +12,11 @@ from monix.tools.system.metrics import (
     uptime_seconds_value,
 )
 from monix.tools.system.network import network_io
-from monix.tools.system.processes import parse_ps, top_processes
+from monix.tools.system.processes import all_processes, parse_ps, top_processes
 from monix.tools.system.swap import swap_info
 
 __all__ = [
+    "all_processes",
     "build_alerts",
     "collect_snapshot",
     "container_inspect",

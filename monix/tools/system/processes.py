@@ -21,7 +21,7 @@ def top_processes(limit: int = 10) -> list[dict]:
     return []
 
 
-def parse_ps(output: str, limit: int) -> list[dict]:
+def parse_ps(output: str, limit: int, sort_by: str = "cpu") -> list[dict]:
     rows = []
     for line in output.splitlines()[1:]:
         parts = line.split(None, 4)
@@ -37,5 +37,24 @@ def parse_ps(output: str, limit: int) -> list[dict]:
             })
         except ValueError:
             continue
-    rows.sort(key=lambda r: r["cpu"], reverse=True)
+    rows.sort(key=lambda r: r.get(sort_by, 0), reverse=True)
     return rows[:limit]
+
+
+def all_processes() -> list[dict]:
+    """Return all processes without limiting or sorting."""
+    commands = (
+        ["ps", "-eo", "pid,ppid,pcpu,pmem,comm", "--sort=-pcpu"],
+        ["ps", "-Ao", "pid,ppid,%cpu,%mem,comm"],
+    )
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command, text=True, timeout=3,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            )
+            if result.returncode == 0 and result.stdout:
+                return parse_ps(result.stdout, limit=9999, sort_by="cpu")
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return []
