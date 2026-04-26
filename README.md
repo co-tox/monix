@@ -4,6 +4,8 @@
 
 ## Overview
 <img width="800" height="450" alt="Image" src="https://github.com/user-attachments/assets/e49b62f6-fdd6-4e33-b30d-987be4c2696b" />
+
+
 Monix is a terminal-native, **read-only** AI assistant for server monitoring. It pairs a slash-command CLI with a Gemini-backed conversational agent so operators can inspect CPU, memory, disk, processes, services, and logs (plain files, Nginx, Docker) without leaving the shell — and without ever issuing destructive commands.
 
 - **Two interfaces, one mental model** — fast `/slash` commands for known intents, natural-language chat for everything else. Both share the same underlying tools.
