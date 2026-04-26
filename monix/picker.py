@@ -15,6 +15,9 @@ COMMANDS: list[tuple[str, str]] = [
     ("/cpu",     "CPU 사용률 + Load average"),
     ("/memory",  "메모리 사용량 상세"),
     ("/disk",    "디스크 사용량"),
+    ("/swap",    "스왑 사용량"),
+    ("/net",     "네트워크 I/O  인터페이스별 bps"),
+    ("/io",      "디스크 I/O  읽기/쓰기 속도"),
     ("/watch",   "실시간 모니터링  [초]"),
     ("/top",     "프로세스 TOP  [개수]"),
     ("/log",     "로그 관리  add·list·@alias·--live"),
@@ -26,7 +29,7 @@ COMMANDS: list[tuple[str, str]] = [
     ("/exit",    "종료"),
 ]
 
-NO_ARG_COMMANDS = {"/status", "/cpu", "/memory", "/disk", "/clear", "/help", "/exit"}
+NO_ARG_COMMANDS = {"/status", "/cpu", "/memory", "/disk", "/swap", "/net", "/io", "/clear", "/help", "/exit"}
 
 # Fixed height: filter line + blank separator + one slot per command.
 # Pre-allocating this many lines prevents terminal scroll during redraws.
