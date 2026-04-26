@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import shlex
 import sys
+import threading
 import time
 
 from monix import __version__
 from monix.config import Settings
 from monix.core.assistant import answer, infer_service_name, local_answer
-from monix.picker import NO_ARG_COMMANDS, pick
+from monix.picker import NO_ARG_COMMANDS, pick, pick_with_filter
 from monix.tools.logs import follow_log, registry, tail_log
 from monix.tools.logs.docker import follow_container, tail_container
-from monix.tools.processes import top_processes
 from monix.tools.services import service_status
 from monix.render import (
     clear_screen,
@@ -22,10 +23,16 @@ from monix.render import (
     render_logs,
     render_reply,
     render_processes,
+    render_service,
     render_snapshot,
     render_welcome,
+    render_memory,
+    render_disk,
+    render_cpu,
+    render_tool_done,
+    render_tool_fail,
+    render_tool_start,
 )
-    render_service,
 from monix.tools.system import collect_snapshot, cpu_usage_percent, disk_info, load_average, memory_info, top_processes
 
 
@@ -55,6 +62,88 @@ HELP = """Commands:
 
 자연어로도 바로 물어볼 수 있어요:
   "CPU 왜 이렇게 높아?"  "nginx 서비스 확인해줘"  "메모리 언제 부족해질까?\""""
+
+
+_HISTORY: list[str] = []
+
+
+def _read_line(prompt_str: str) -> str:
+    """readline/input 기반 입력. 한글 IME와 좌우 이동을 유지하고 '/' 단독 입력 시 피커를 연다."""
+    try:
+        import readline as _rl
+    except ImportError:
+        _rl = None
+
+    if _rl is not None:
+        existing = {_rl.get_history_item(i) for i in range(1, _rl.get_current_history_length() + 1)}
+        for entry in _HISTORY:
+            if entry and entry not in existing:
+                _rl.add_history(entry)
+
+    raw = input(prompt_str)
+    if raw.strip() != "/":
+        return raw
+
+    selected = pick_with_filter() or pick()
+    if not selected:
+        return ""
+    if selected in NO_ARG_COMMANDS:
+        return selected
+
+    if _rl is None:
+        return selected
+
+    _rl.set_startup_hook(lambda: _rl.insert_text(selected + " "))
+    try:
+        full = input(prompt()).strip()
+    finally:
+        _rl.set_startup_hook(None)
+    return full or selected
+
+
+class Spinner:
+    _FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, message: str = "") -> None:
+        self._message = message
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        for frame in itertools.cycle(self._FRAMES):
+            if self._stop.is_set():
+                break
+            sys.stdout.write(f"\r  {frame}  {self._message}")
+            sys.stdout.flush()
+            time.sleep(0.08)
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+    def __enter__(self) -> "Spinner":
+        if sys.stdout.isatty():
+            self._thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join()
+
+
+def _run_with_indicator(label: str, fn, *args, **kwargs):
+    if not sys.stdout.isatty():
+        return fn(*args, **kwargs)
+    print(render_tool_start(label))
+    t0 = time.time()
+    try:
+        result = fn(*args, **kwargs)
+        sys.stdout.write(f"\033[A\r\033[K{render_tool_done(label, time.time() - t0)}\n")
+        sys.stdout.flush()
+        return result
+    except Exception:
+        sys.stdout.write(f"\033[A\r\033[K{render_tool_fail(label, time.time() - t0)}\n")
+        sys.stdout.flush()
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -124,17 +213,12 @@ def repl(settings: Settings | None = None) -> int:
     print(render_welcome(collect_snapshot(settings), settings.gemini_enabled))
     while True:
         try:
-            raw = input(prompt()).strip()
+            raw = _read_line(prompt()).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return 0
         if not raw:
             continue
-
-        if raw == "/":
-            raw = _pick_and_fill()
-            if not raw:
-                continue
 
         if raw in {"/exit", "exit", "quit", "/quit"}:
             return 0
@@ -146,6 +230,10 @@ def repl(settings: Settings | None = None) -> int:
             output = f"오류: {exc}"
         if output:
             print(render_reply(output))
+        if raw:
+            _HISTORY.append(raw)
+            if len(_HISTORY) > 100:
+                _HISTORY.pop(0)
 
 
 def dispatch(raw: str, settings: Settings | None = None, history: list[dict] | None = None) -> str:
@@ -167,7 +255,8 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             history.clear()
         return "대화 기록을 초기화했습니다. 새로운 대화를 시작해요!"
     if command == "/status":
-        return render_snapshot(collect_snapshot(settings))
+        snap = _run_with_indicator("snapshot", collect_snapshot, settings)
+        return render_snapshot(snap)
     if command == "/cpu":
         return render_cpu(cpu_usage_percent(), load_average())
     if command == "/memory":
@@ -179,30 +268,34 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         return watch(interval, settings)
     if command == "/top":
         limit = _int_arg(args, 0, 10)
-        return render_processes(top_processes(limit))
+        procs = _run_with_indicator("top_processes", top_processes, limit)
+        return render_processes(procs)
     if command == "/log":
         return _dispatch_log(args, settings)
     if command == "/logs":
         path = args[0] if args else settings.log_file
         lines = _int_arg(args, 1, 80)
-        return render_logs(tail_log(path, lines))
+        log = _run_with_indicator("tail_log", tail_log, path, lines)
+        return render_logs(log)
     if command == "/service":
         if not args:
             return "사용법: /service <name>"
-        return render_service(service_status(args[0]))
+        svc = _run_with_indicator("service_status", service_status, args[0])
+        return render_service(svc)
     if command == "/ask":
         if not args:
             return "사용법: /ask <question>"
-        return answer(" ".join(args), settings, history)
+        with Spinner("Gemini에 질문 중..."):
+            return answer(" ".join(args), settings, history)
     return f"알 수 없는 명령입니다: {command}\n/help를 입력해 사용 가능한 명령을 확인하세요."
 
 
 def dispatch_natural(raw: str, settings: Settings | None = None, history: list[dict] | None = None) -> str:
     settings = settings or Settings.from_env()
 
-    # Gemini 활성화 시 모든 자연어를 AI로 라우팅 (Claude처럼)
     if settings.gemini_enabled:
-        return answer(raw, settings, history)
+        with Spinner("Gemini에 질문 중..."):
+            return answer(raw, settings, history)
 
     # Local fallback
     lowered = raw.lower()

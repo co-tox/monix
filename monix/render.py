@@ -13,10 +13,13 @@ _LOG_WARN_RE = re.compile(r"\b(WARN|WARNING)\b", re.IGNORECASE)
 
 
 _MASCOT = [
-    r"  /\_/\  ",
-    r" ( o . o)",
-    r"  > Gemini <",
-    r"  ~(___)-",
+    r"    ╔══════╗    ",
+    r"  ╔═╝      ╚═╗  ",
+    r"  ║  ( [O] ) ║  ",
+    r"  ╠══════════╣  ",
+    r"  ║ ██ ██ ██ ║  ",
+    r"  ║ ██ ██ ██ ║  ",
+    r"  ╚══════════╝  ",
 ]
 
 
@@ -179,6 +182,18 @@ def render_service(result: dict) -> str:
     return f"Service: {result['name']} {badge(result['status'], status_color)}\n{result['details']}"
 
 
+def render_tool_start(name: str) -> str:
+    return f"  {style('⏺', 'cyan')}  {style(name, 'muted')}"
+
+
+def render_tool_done(name: str, elapsed: float) -> str:
+    return f"  {style('✔', 'green')}  {style(name, 'muted')}  {style(f'({elapsed:.1f}s)', 'muted')}"
+
+
+def render_tool_fail(name: str, elapsed: float) -> str:
+    return f"  {style('✖', 'red')}  {style(name, 'muted')}  {style(f'({elapsed:.1f}s)', 'muted')}"
+
+
 def _process_lines(processes: list[dict]) -> list[str]:
     if not processes:
         return ["no process data"]
@@ -254,8 +269,11 @@ def supports_color() -> bool:
 
 
 def _rule(width: int, position: str = "mid") -> str:
-    del position
-    return style("+" + "-" * (width - 2) + "+", "muted")
+    if position == "top":
+        return style("┌" + "─" * (width - 2) + "┐", "muted")
+    if position == "bottom":
+        return style("└" + "─" * (width - 2) + "┘", "muted")
+    return style("├" + "─" * (width - 2) + "┤", "muted")
 
 
 def _line(label: str, value: str, inner: int) -> str:
@@ -266,7 +284,7 @@ def _line(label: str, value: str, inner: int) -> str:
 def _text(value: str, inner: int) -> str:
     clipped = _clip_ansi(value, inner)
     padding = inner - _visible_len(clipped)
-    return f"{style('|', 'muted')} {clipped}{' ' * padding} {style('|', 'muted')}"
+    return f"{style('│', 'muted')} {clipped}{' ' * padding} {style('│', 'muted')}"
 
 
 def _metric(label: str, value: float | None, inner: int, suffix: str = "") -> str:
@@ -278,10 +296,10 @@ def _metric(label: str, value: float | None, inner: int, suffix: str = "") -> st
 
 def _bar(value: float | None, width: int = 24) -> str:
     if value is None:
-        return "[" + "?" * width + "]"
+        return style("░" * width, "muted")
     filled = max(0, min(width, round((value / 100) * width)))
     color = "green" if value < 70 else "yellow" if value < 85 else "red"
-    return "[" + style("#" * filled, color) + style("-" * (width - filled), "muted") + "]"
+    return style("█" * filled, color) + style("░" * (width - filled), "muted")
 
 
 def _visible_len(value: str) -> int:
