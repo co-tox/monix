@@ -602,6 +602,139 @@ def render_nginx_summary(result: dict) -> str:
     return "\n".join(lines)
 
 
+def render_docker_stats(stats: list[dict]) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 130)
+    inner = max(width - 4, 60)
+    lines = [_rule(width, "top"), _text(style("Docker Stats", "bold"), inner), _rule(width, "mid")]
+
+    if not stats:
+        lines += [_text("No containers running.", inner), _rule(width, "bottom")]
+        return "\n".join(lines)
+
+    first = stats[0]
+    if "error" in first:
+        lines += [_text(first["error"], inner), _rule(width, "bottom")]
+        return "\n".join(lines)
+
+    lines.append(_text(
+        f"  {style('NAME', 'bold'):<30}  {'CPU%':>7}  {'MEM%':>6}  {'MEM USAGE':<18}  {'NET I/O':<22}  {'BLOCK I/O':<18}  {'PIDs':>4}",
+        inner,
+    ))
+    lines.append(_rule(width))
+    for s in stats:
+        name = (s.get("Name") or "?")[:28]
+        cpu = s.get("CPUPerc") or "-"
+        mem_pct = s.get("MemPerc") or "-"
+        mem_usage = s.get("MemUsage") or "-"
+        net_io = s.get("NetIO") or "-"
+        block_io = s.get("BlockIO") or "-"
+        pids = s.get("PIDs") or "-"
+        lines.append(_text(
+            f"  {name:<30}  {cpu:>7}  {mem_pct:>6}  {mem_usage:<18}  {net_io:<22}  {block_io:<18}  {pids:>4}",
+            inner,
+        ))
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
+
+
+def render_docker_top(result: dict) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    container = result.get("container", "?")
+    lines = [
+        _rule(width, "top"),
+        _text(f"{style('Docker Top', 'bold')}  {style(container, 'cyan')}", inner),
+        _rule(width, "mid"),
+    ]
+    if result.get("status") != "ok":
+        lines += [_text(result.get("error", "unknown error"), inner), _rule(width, "bottom")]
+        return "\n".join(lines)
+
+    headers = result.get("headers") or []
+    rows = result.get("rows") or []
+    if not rows:
+        lines += [_text("No processes.", inner), _rule(width, "bottom")]
+        return "\n".join(lines)
+
+    if headers:
+        header_str = "  " + "  ".join(
+            f"{h:<12}" if i < len(headers) - 1 else h for i, h in enumerate(headers)
+        )
+        lines.append(_text(style(header_str, "bold"), inner))
+        lines.append(_rule(width))
+
+    for row in rows:
+        row_str = "  " + "  ".join(
+            f"{cell:<12}" if i < len(row) - 1 else cell for i, cell in enumerate(row)
+        )
+        lines.append(_text(row_str, inner))
+
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
+
+
+def render_docker_inspect(info: dict) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    container = info.get("container", "?")
+    lines = [
+        _rule(width, "top"),
+        _text(f"{style('Docker Inspect', 'bold')}  {style(container, 'cyan')}", inner),
+        _rule(width, "mid"),
+    ]
+    if info.get("status") != "ok":
+        lines += [_text(info.get("error", "unknown error"), inner), _rule(width, "bottom")]
+        return "\n".join(lines)
+
+    state = info.get("state", "?")
+    state_color = "green" if state == "running" else "red"
+    health = info.get("health_status", "none")
+    health_color = "green" if health == "healthy" else "yellow" if health in ("none", "starting") else "red"
+
+    started = (info.get("started_at") or "?")[:19].replace("T", " ")
+    lines += [
+        _line("Name", info.get("name", "?"), inner),
+        _line("Image", info.get("image", "?"), inner),
+        _line("State", style(state, state_color), inner),
+        _line("Health", style(health, health_color), inner),
+        _line("Started", started, inner),
+        _line("Restarts", str(info.get("restart_count", 0)), inner),
+    ]
+
+    networks = info.get("networks") or []
+    ip = info.get("ip_address") or ""
+    net_str = ", ".join(networks) + (f"  ({ip})" if ip else "")
+    if net_str:
+        lines.append(_line("Networks", net_str, inner))
+
+    ports = info.get("ports") or []
+    if ports:
+        lines.append(_rule(width))
+        lines.append(_text(style("Ports", "cyan"), inner))
+        for p in ports:
+            lines.append(_text(f"  {p}", inner))
+
+    mounts = info.get("mounts") or []
+    if mounts:
+        lines.append(_rule(width))
+        lines.append(_text(style("Mounts", "cyan"), inner))
+        for m in mounts:
+            mode = f" [{m['mode']}]" if m.get("mode") else ""
+            lines.append(_text(f"  {m.get('source', '?')} → {m.get('destination', '?')}{mode}", inner))
+
+    env = info.get("env") or []
+    if env:
+        lines.append(_rule(width))
+        lines.append(_text(style("Environment", "cyan"), inner))
+        for e in env[:10]:
+            lines.append(_text(f"  {e}", inner))
+        if len(env) > 10:
+            lines.append(_text(style(f"  … and {len(env) - 10} more", "muted"), inner))
+
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
+
+
 def render_docker_containers(containers: list) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
