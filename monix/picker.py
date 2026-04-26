@@ -11,26 +11,26 @@ except ImportError:
 
 
 COMMANDS: list[tuple[str, str]] = [
-    ("/status",         "서버 상태  CPU · 메모리 · 디스크"),
-    ("/cpu",            "CPU 사용률 + Load average"),
-    ("/memory",         "메모리 사용량 상세"),
-    ("/disk",           "디스크 사용량"),
-    ("/swap",           "스왑 사용량"),
-    ("/net",            "네트워크 I/O  인터페이스별 bps"),
-    ("/io",             "디스크 I/O  읽기/쓰기 속도"),
-    ("/watch",          "실시간 모니터링  [초]"),
-    ("/top",            "프로세스 TOP  [개수]"),
-    ("/log",            "로그 관리  add·list·@alias·--live"),
-    ("/logs",           "로그 보기 (기존)  [경로] [줄수]"),
-    ("/docker",         "Docker  ps·logs·search·live"),
-    ("/service",        "서비스 상태  <이름>"),
-    ("/ask",            "Gemini 질문  <내용>"),
-    ("/clear",          "대화 초기화"),
-    ("/help",           "도움말"),
     ("/exit",           "종료"),
+    ("/help",           "도움말"),
+    ("/clear",          "대화 초기화"),
+    ("/ask",            "Gemini 질문  <내용>"),
+    ("/service",        "서비스 상태  <이름>"),
+    ("/docker",         "Docker  ps·logs·search·live"),
+    ("/logs",           "로그 보기 (기존)  [경로] [줄수]"),
+    ("/log",            "로그 관리  add·list·@alias·--live"),
+    ("/top",            "프로세스 TOP  [개수]"),
+    ("/watch",          "실시간 모니터링  [초]"),
+    ("/io",             "디스크 I/O  읽기/쓰기 속도"),
+    ("/net",            "네트워크 I/O  인터페이스별 bps"),
+    ("/swap",           "스왑 사용량"),
+    ("/disk",           "디스크 사용량"),
+    ("/memory",         "메모리 사용량 상세"),
+    ("/cpu",            "CPU 사용률 + Load average"),
+    ("/stat",    "종합 단발 스냅샷  swap · net · io 포함"),
 ]
 
-NO_ARG_COMMANDS = {"/status", "/cpu", "/memory", "/disk", "/swap", "/net", "/io", "/clear", "/help", "/exit"}
+NO_ARG_COMMANDS = {"/status", "/stat", "/cpu", "/memory", "/disk", "/swap", "/net", "/io", "/clear", "/help", "/exit"}
 
 # Fixed height: filter line + blank separator + one slot per command.
 # Pre-allocating this many lines prevents terminal scroll during redraws.

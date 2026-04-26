@@ -201,6 +201,66 @@ def render_disk_io(devices: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def render_stat(snapshot: dict, swap: dict, interfaces: list[dict], devices: list[dict]) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    memory = snapshot.get("memory", {})
+    disk = (snapshot.get("disks") or [{}])[0]
+    alerts = snapshot.get("alerts") or []
+    alert_text = badge(f"{len(alerts)} alert(s)", "red") if alerts else badge("healthy", "green")
+    swap_total = swap.get("total") or 0
+
+    lines = [
+        _rule(width, "top"),
+        _text(f"{style('Stat', 'bold')}  {snapshot.get('host', '')}  {style(snapshot.get('time', ''), 'muted')}  {alert_text}", inner),
+        _rule(width, "mid"),
+        _metric("CPU", snapshot.get("cpu_percent"), inner),
+        _line("Load", _load(snapshot.get("load_average")), inner),
+        _metric("Memory", memory.get("percent"), inner, suffix=f"{human_bytes(memory.get('available'))} free"),
+        (_metric("Swap", swap.get("percent"), inner, suffix=f"{human_bytes(swap.get('free'))} free")
+         if swap_total > 0 else _text(style("Swap        disabled", "muted"), inner)),
+        _metric(disk.get("path", "/"), disk.get("percent"), inner, suffix=f"{human_bytes(disk.get('free'))} free"),
+        _rule(width, "mid"),
+        _text(style("Network I/O", "cyan"), inner),
+        *_net_stat_lines(interfaces, inner),
+        _rule(width, "mid"),
+        _text(style("Disk I/O", "cyan"), inner),
+        *_io_stat_lines(devices, inner),
+        _rule(width, "mid"),
+        _text(style("Top Processes", "cyan"), inner),
+        *[_text(line, inner) for line in _process_lines(snapshot.get("top_processes", []))],
+        _rule(width, "bottom"),
+    ]
+    return "\n".join(lines)
+
+
+def _net_stat_lines(interfaces: list[dict], inner: int) -> list[str]:
+    visible = [i for i in interfaces
+               if i["rx_bps"] > 0 or i["tx_bps"] > 0
+               or i.get("rx_bytes_total", 0) + i.get("tx_bytes_total", 0) >= 100 * 1024 * 1024]
+    if not visible:
+        visible = interfaces[:2]
+    if not visible:
+        return [_text("no data", inner)]
+    return [
+        _line(f"{i['interface']:<12}",
+              f"↓ {human_bytes(int(i['rx_bps'])) + '/s':<14}  ↑ {human_bytes(int(i['tx_bps'])) + '/s'}",
+              inner)
+        for i in visible
+    ]
+
+
+def _io_stat_lines(devices: list[dict], inner: int) -> list[str]:
+    if not devices:
+        return [_text("no data", inner)]
+    return [
+        _line(f"{d['device']:<12}",
+              f"R {human_bytes(int(d['read_bps'])) + '/s':<14}  W {human_bytes(int(d['write_bps'])) + '/s'}",
+              inner)
+        for d in devices[:3]
+    ]
+
+
 def render_processes(processes: list[dict]) -> str:
     return "\n".join([style("PID      CPU%   MEM%   COMMAND", "bold"), *_process_lines(processes)])
 
