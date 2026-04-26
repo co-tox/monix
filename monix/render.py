@@ -11,15 +11,17 @@ from monix.tools.system import human_bytes
 _LOG_ERROR_RE = re.compile(r"\b(ERROR|FATAL|CRITICAL|Exception|Traceback)\b", re.IGNORECASE)
 _LOG_WARN_RE = re.compile(r"\b(WARN|WARNING)\b", re.IGNORECASE)
 
-
 _MASCOT = [
-    r"    ╔══════╗    ",
-    r"  ╔═╝      ╚═╗  ",
-    r"  ║  ( [O] ) ║  ",
-    r"  ╠══════════╣  ",
-    r"  ║ ██ ██ ██ ║  ",
-    r"  ║ ██ ██ ██ ║  ",
-    r"  ╚══════════╝  ",
+    r"        ███        ",
+    r"      ███████      ",
+    r"     █████████     ",
+    r"     ██ [ ] ██     ",
+    r"    ███████████    ",
+    r"   █████████████   ",
+    r"  ███████████████  ",
+    r"  ████   █   ████  ",
+    r"  ███████████████  ",
+    r"   █████████████   ",
 ]
 
 
