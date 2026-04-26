@@ -98,7 +98,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         return None
 
     N = len(COMMANDS)
-    BLOCK = _PICKER_BLOCK  # = N  (items only; filter is on P)
+    BLOCK = _PICKER_BLOCK
 
     query_buf: list[str] = []
     q_cursor = 0
@@ -217,7 +217,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         out.append("\r\033[K")              # Clear P (cursor at P col 0)
         for _ in range(BLOCK):
             out.append("\033[1B\r\033[K")   # Clear P+1 ~ P+N
-        out.append(f"\033[{BLOCK + 1}A\r")  # Back to P col 0
+        out.append(f"\033[{BLOCK}A\r")      # Back to P col 0
         sys.stdout.write("".join(out))
         sys.stdout.flush()
 
