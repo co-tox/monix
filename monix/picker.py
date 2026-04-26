@@ -27,11 +27,13 @@ COMMANDS: list[tuple[str, str]] = [
 # Subcommand options revealed when the user types "<command> " (trailing space)
 # in the picker — e.g. "log " expands to /log add, /log list, /log remove, ...
 SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
+    "/service": [
+        ("list",   "List all services"),
+    ],
     "/collect": [
         ("list",    "Show current configuration"),
         ("set",     "<interval> <retention> <folder>  Configure collector"),
         ("remove",  "Disable and remove collector"),
-        ("help",    "Show /collect usage details"),
     ],
     "/log": [
         ("add",          "@alias -app|-nginx|-docker <path>  Register log"),
@@ -82,7 +84,7 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
 }
 
 NO_ARG_COMMANDS = {
-    "/stat", "/watch", "/collect",
+    "/stat", "/watch", "/collect", "/service", "/top",
     "/clear", "/help", "/exit",
     # subcommands that take no further args — Enter immediately submits.
     "/log list", "/log help",
