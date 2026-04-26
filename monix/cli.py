@@ -11,6 +11,14 @@ import unicodedata
 from monix import __version__
 from monix.config import Settings
 from monix.core.assistant import answer, infer_service_name, local_answer
+from monix.tools.collect import (
+    CollectorConfig,
+    collect_and_save,
+    load_config as load_collector_config,
+    load_history,
+    purge_old_files,
+    save_config as save_collector_config,
+)
 from monix.picker import NO_ARG_COMMANDS, pick, pick_with_filter
 from monix.tools.logs import follow_log, registry, search_log, tail_log
 from monix.tools.logs.docker import follow_container, list_containers, search_container, tail_container
@@ -33,6 +41,7 @@ from monix.render import (
     render_memory,
     render_network,
     render_reply,
+    render_history,
     render_processes,
     render_service,
     render_snapshot,
@@ -57,8 +66,12 @@ from monix.tools.system import (
 
 
 HELP = """Commands:
-  /stat [cpu|memory|disk|swap|net|io]  단발 스냅샷 (인자 없으면 전체)
-  /watch [cpu|memory|disk|swap|net|io] [seconds]  실시간 모니터링 (기본 5s, Ctrl-C로 종료)
+  /stat [all|cpu|memory|…] [기간]  단발 스냅샷 또는 수집 이력 조회 (/stat 으로 상세 안내)
+  /watch [all|cpu|memory|…] [초]   실시간 모니터링 (/watch 로 상세 안내)
+  /collect                         수집기 명령어 목록
+  /collect list                    수집기 설정 조회
+  /collect set <주기> <보존기간> <폴더>  수집기 추가/수정
+  /collect remove                  수집기 삭제
   /log add @alias -app <path>      앱 로그 등록
   /log add @alias -nginx <path>    Nginx 로그 등록
   /log add @alias -docker <name>   Docker 컨테이너 로그 등록
@@ -93,6 +106,31 @@ HELP = """Commands:
 
 
 _HISTORY: list[str] = []
+
+_collector_stop: threading.Event = threading.Event()
+_collector_thread: threading.Thread | None = None
+
+
+def _start_collector(cfg: CollectorConfig) -> None:
+    global _collector_thread, _collector_stop
+    _collector_stop.set()
+    _collector_stop = threading.Event()
+    stop = _collector_stop
+    interval_sec = cfg.interval_days * 86400
+
+    def _run() -> None:
+        while True:
+            try:
+                collect_and_save(cfg.folder)
+                if cfg.retention_days > 0:
+                    purge_old_files(cfg.folder, cfg.retention_days)
+            except Exception:
+                pass
+            if stop.wait(interval_sec):
+                break
+
+    _collector_thread = threading.Thread(target=_run, daemon=True, name="monix-collector")
+    _collector_thread.start()
 
 
 def _read_line(prompt_str: str) -> str:
@@ -427,6 +465,9 @@ def build_parser() -> argparse.ArgumentParser:
 def repl(settings: Settings | None = None) -> int:
     settings = settings or Settings.from_env()
     history: list[dict] = []
+    cfg = load_collector_config()
+    if cfg:
+        _start_collector(cfg)
     print(clear_screen(), end="")
     print(render_welcome(collect_snapshot(settings), settings.gemini_enabled))
     while True:
@@ -473,8 +514,8 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             history.clear()
         return "대화 기록을 초기화했습니다. 새로운 대화를 시작해요!"
     if command == "/stat":
-        metric = args[0] if args else None
-        return stat(settings, metric)
+        metric, period = _stat_args(args)
+        return stat(settings, metric, period)
     if command == "/cpu":
         return render_cpu(cpu_usage_percent(), load_average())
     if command == "/memory":
@@ -489,7 +530,7 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         return render_disk_io(disk_io())
     if command == "/watch":
         interval, metric = _watch_args(args)
-        return watch(interval, settings, metric)
+        return watch(interval, settings, metric or None)
     if command == "/top":
         limit = _int_arg(args, 0, 10)
         procs = _run_with_indicator("top_processes", top_processes, limit)
@@ -513,6 +554,8 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             return "사용법: /ask <question>"
         with Spinner("Gemini에 질문 중..."):
             return answer(" ".join(args), settings, history)
+    if command == "/collect":
+        return _dispatch_collect(args)
     return f"알 수 없는 명령입니다: {command}\n/help를 입력해 사용 가능한 명령을 확인하세요."
 
 
@@ -544,36 +587,109 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
     return local_answer(raw)
 
 
+_METRICS = {"cpu", "memory", "mem", "disk", "swap", "net", "network", "io"}
+
+_STAT_HELP = (
+    "사용 가능한 메트릭:\n"
+    "  /stat all              현재 전체 스냅샷\n"
+    "  /stat cpu              CPU + Load avg\n"
+    "  /stat memory           메모리\n"
+    "  /stat disk             디스크\n"
+    "  /stat swap             스왑\n"
+    "  /stat net              네트워크 I/O\n"
+    "  /stat io               디스크 I/O\n"
+    "\n"
+    "기간 인자를 추가하면 수집 이력을 조회합니다:\n"
+    "  /stat all 1d           최근 1일 전체 이력\n"
+    "  /stat cpu 24h          최근 24시간 CPU 이력\n"
+    "  /stat all 2026-04-25   특정 날짜\n"
+    "  /stat cpu 2026-04-24~2026-04-26  날짜 범위"
+)
+
+_WATCH_HELP = (
+    "사용 가능한 메트릭:\n"
+    "  /watch all             전체 실시간 모니터링\n"
+    "  /watch cpu             CPU 실시간\n"
+    "  /watch memory          메모리 실시간\n"
+    "  /watch disk            디스크 실시간\n"
+    "  /watch swap            스왑 실시간\n"
+    "  /watch net             네트워크 I/O 실시간\n"
+    "  /watch io              디스크 I/O 실시간\n"
+    "\n"
+    "  갱신 주기(초)를 뒤에 추가할 수 있습니다:\n"
+    "  /watch cpu 10          CPU를 10초마다 갱신"
+)
+
+
+def _stat_args(args: list[str]) -> tuple[str | None, str | None]:
+    metric = None
+    period = None
+    for a in args:
+        if a.lower() == "all":
+            metric = "all"
+        elif a.lower() in _METRICS:
+            metric = a.lower()
+        else:
+            period = a
+    return metric, period
+
+
+def _parse_period(s: str):
+    import re
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    if "~" in s:
+        left, right = s.split("~", 1)
+        start = datetime.strptime(left.strip(), "%Y-%m-%d")
+        end = datetime.strptime(right.strip(), "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        return start, end, f"{left.strip()} ~ {right.strip()}"
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        start = datetime.strptime(s, "%Y-%m-%d")
+        end = start.replace(hour=23, minute=59, second=59)
+        return start, end, s
+    days = _parse_duration_days(s)
+    return now - timedelta(days=days), now, f"최근 {_fmt_duration(days)}"
+
+
 def watch(interval: int, settings: Settings | None = None, metric: str | None = None) -> str:
+    if not metric:
+        return _WATCH_HELP
     settings = settings or Settings.from_env()
-    interval = max(interval, 2)
+    interval = max(interval, 1)
+    show_all = metric == "all"
     try:
         while True:
             print("\033[2J\033[H", end="")
-            if metric:
-                print(_stat_single(metric, settings))
+            if show_all:
+                print(_stat_all(settings))
             else:
-                print(render_snapshot(collect_snapshot(settings)))
-            label = f"  [{metric}]" if metric else ""
-            print(f"\nRefreshing every {interval}s{label}. Press Ctrl-C to stop.")
+                print(_stat_single(metric, settings))
+            print(f"\n  [{metric}]  {interval}s마다 갱신 · Ctrl-C 종료")
             time.sleep(interval)
     except KeyboardInterrupt:
         return "watch를 종료했습니다."
 
 
-def stat(settings: Settings | None = None, metric: str | None = None) -> str:
+def stat(settings: Settings | None = None, metric: str | None = None, period: str | None = None) -> str:
+    if not metric:
+        return _STAT_HELP
     settings = settings or Settings.from_env()
-    if metric:
-        return _stat_single(metric, settings)
-    parts = [
+    if period:
+        return _stat_history(None if metric == "all" else metric, period)
+    if metric == "all":
+        return _stat_all(settings)
+    return _stat_single(metric, settings)
+
+
+def _stat_all(settings: Settings) -> str:
+    return "\n".join([
         render_cpu(cpu_usage_percent(), load_average()),
         render_memory(memory_info()),
         render_disk(disk_info()),
         render_swap(swap_info()),
         render_network(network_io()),
         render_disk_io(disk_io()),
-    ]
-    return "\n".join(parts)
+    ])
 
 
 def _stat_single(metric: str, settings: Settings) -> str:
@@ -590,17 +706,33 @@ def _stat_single(metric: str, settings: Settings) -> str:
         return render_network(network_io())
     if m == "io":
         return render_disk_io(disk_io())
-    return f"알 수 없는 메트릭: {metric}\n사용 가능: cpu, memory, disk, swap, net, io"
+    return f"알 수 없는 메트릭: {metric}\n사용 가능: all, cpu, memory, disk, swap, net, io"
+
+
+def _stat_history(metric: str | None, period: str) -> str:
+    cfg = load_collector_config()
+    if not cfg:
+        return "수집기가 설정되지 않았습니다.\n/collect set 으로 설정 후 데이터를 수집해주세요."
+    try:
+        start, end, label = _parse_period(period)
+    except ValueError:
+        return f"기간 형식 오류: {period}\n예) 1d  24h  2026-04-25  2026-04-24~2026-04-26"
+    records = load_history(cfg.folder, start, end)
+    return render_history(records, metric, label)
 
 
 def _watch_args(args: list[str]) -> tuple[int, str | None]:
     interval = 5
     metric = None
     for a in args:
-        try:
-            interval = int(a)
-        except ValueError:
-            metric = a
+        al = a.lower()
+        if al == "all" or al in _METRICS:
+            metric = al
+        else:
+            try:
+                interval = int(a)
+            except ValueError:
+                pass
     return interval, metric
 
 
@@ -1087,6 +1219,90 @@ def _log_search_natural(alias: str, text: str) -> str:
     tokens = {t.strip("@.,?!:；。").lower() for t in text.split()}
     scan_lines = 999999 if tokens & _ALL_LINES_KEYWORDS else 2000
     return _log_search_entry(entry, pattern, lines=scan_lines)
+
+
+def _parse_duration_days(s: str) -> float:
+    """'30s', '5m', '2h', '1d' 등을 일(day) 단위 float으로 변환."""
+    s = s.strip().lower()
+    _units = {"s": 1 / 86400, "m": 1 / 1440, "h": 1 / 24, "d": 1.0}
+    for suffix, factor in _units.items():
+        if s.endswith(suffix):
+            return float(s[:-1]) * factor
+    return float(s)  # 단위 없으면 일(day)로 처리
+
+
+def _fmt_duration(days: float) -> str:
+    """일 단위 float을 사람이 읽기 쉬운 문자열로."""
+    seconds = days * 86400
+    if seconds < 60:
+        return f"{seconds:.0f}초"
+    if seconds < 3600:
+        return f"{seconds / 60:.0f}분"
+    if seconds < 86400:
+        return f"{seconds / 3600:.1f}시간"
+    return f"{days:.1f}일"
+
+
+def _dispatch_collect(args: list[str]) -> str:
+    if not args:
+        return (
+            "수집기 명령어:\n"
+            "  /collect list                    현재 수집기 설정 조회\n"
+            "  /collect set <주기> <보존기간> <폴더>  수집기 추가/수정\n"
+            "  /collect remove                  수집기 삭제\n"
+            "\n"
+            "  단위: s(초) m(분) h(시간) d(일) — 생략 시 일(d)\n"
+            "  예)  /collect set 1h 30d /path/to/folder"
+        )
+
+    sub = args[0]
+
+    if sub == "list":
+        cfg = load_collector_config()
+        if not cfg:
+            return "수집기가 설정되지 않았습니다. /collect set 으로 설정해주세요."
+        active = _collector_thread is not None and _collector_thread.is_alive()
+        status = "실행 중" if active else "중지됨"
+        return (
+            f"수집기 설정 [{status}]\n"
+            f"  주기:     {_fmt_duration(cfg.interval_days)}\n"
+            f"  보존기간: {_fmt_duration(cfg.retention_days)}\n"
+            f"  저장폴더: {cfg.folder}"
+        )
+
+    if sub == "set":
+        rest = args[1:]
+        if len(rest) < 3:
+            return (
+                "사용법: /collect set <주기> <보존기간> <저장폴더>\n"
+                "  예)  /collect set 1h 30d /path/to/folder"
+            )
+        try:
+            interval = _parse_duration_days(rest[0])
+            retention = _parse_duration_days(rest[1])
+        except ValueError:
+            return "주기와 보존기간을 올바르게 입력해주세요.\n  예)  /collect set 1h 30d /path/to/folder"
+        if interval <= 0 or retention <= 0:
+            return "주기와 보존기간은 0보다 커야 합니다."
+        folder = rest[2]
+        cfg = CollectorConfig(interval_days=interval, retention_days=retention, folder=folder)
+        save_collector_config(cfg)
+        _start_collector(cfg)
+        return (
+            f"수집기 설정 완료\n"
+            f"  주기:     {_fmt_duration(interval)}\n"
+            f"  보존기간: {_fmt_duration(retention)}\n"
+            f"  저장폴더: {folder}"
+        )
+
+    if sub == "remove":
+        from monix.tools.collect import CONFIG_PATH
+        _collector_stop.set()
+        if CONFIG_PATH.exists():
+            CONFIG_PATH.unlink()
+        return "수집기를 삭제했습니다."
+
+    return f"알 수 없는 서브커맨드: {sub}\n/collect 를 입력해 사용 가능한 명령을 확인하세요."
 
 
 if __name__ == "__main__":
