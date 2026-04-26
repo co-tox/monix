@@ -13,10 +13,13 @@ _LOG_WARN_RE = re.compile(r"\b(WARN|WARNING)\b", re.IGNORECASE)
 
 
 _MASCOT = [
-    r"  /\_/\  ",
-    r" ( o . o)",
-    r"  > Gemini <",
-    r"  ~(___)-",
+    r"    ╔══════╗    ",
+    r"  ╔═╝      ╚═╗  ",
+    r"  ║  ( [O] ) ║  ",
+    r"  ╠══════════╣  ",
+    r"  ║ ██ ██ ██ ║  ",
+    r"  ║ ██ ██ ██ ║  ",
+    r"  ╚══════════╝  ",
 ]
 
 
@@ -94,6 +97,107 @@ def render_snapshot(snapshot: dict) -> str:
         lines.append("  none")
     lines.append("Top processes:")
     lines.extend(f"  {line}" for line in _process_lines(snapshot.get("top_processes", [])))
+    return "\n".join(lines)
+
+
+def render_cpu(cpu_percent: float | None, load: tuple | None) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    return "\n".join([
+        _rule(width),
+        _text(style("CPU", "bold"), inner),
+        _rule(width),
+        _metric("CPU", cpu_percent, inner),
+        _line("Load avg", _load(load), inner),
+        _rule(width),
+    ])
+
+
+def render_memory(memory: dict) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    return "\n".join([
+        _rule(width),
+        _text(style("Memory", "bold"), inner),
+        _rule(width),
+        _metric("Memory", memory.get("percent"), inner, suffix=f"{human_bytes(memory.get('available'))} free"),
+        _line("Used", human_bytes(memory.get("used")), inner),
+        _line("Available", human_bytes(memory.get("available")), inner),
+        _line("Total", human_bytes(memory.get("total")), inner),
+        _rule(width),
+    ])
+
+
+def render_disk(disks: list[dict]) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    lines = [_rule(width), _text(style("Disk", "bold"), inner), _rule(width)]
+    for disk in disks:
+        suffix = f"{human_bytes(disk.get('free'))} free / {human_bytes(disk.get('total'))}"
+        lines.append(_metric(disk["path"], disk.get("percent"), inner, suffix=suffix))
+    if not disks:
+        lines.append(_text("no disk data", inner))
+    lines.append(_rule(width))
+    return "\n".join(lines)
+
+
+def render_network(interfaces: list[dict]) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    lines = [_rule(width), _text(style("Network I/O", "bold"), inner), _rule(width)]
+    visible = [i for i in interfaces if i["rx_bps"] > 0 or i["tx_bps"] > 0 or
+               i.get("rx_bytes_total", 0) + i.get("tx_bytes_total", 0) >= 100 * 1024 * 1024]
+    if not visible:
+        visible = interfaces[:3]  # fallback: show top 3 even if idle
+    if not visible:
+        lines.append(_text("no network data", inner))
+    else:
+        for iface in visible:
+            rx = human_bytes(int(iface["rx_bps"])) + "/s"
+            tx = human_bytes(int(iface["tx_bps"])) + "/s"
+            label = iface["interface"]
+            lines.append(_line(f"{label:<12}", f"↓ {rx:<14}  ↑ {tx}", inner))
+    lines.append(_rule(width))
+    return "\n".join(lines)
+
+
+def render_swap(swap: dict) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    total = swap.get("total") or 0
+    if total == 0:
+        return "\n".join([
+            _rule(width),
+            _text(style("Swap", "bold"), inner),
+            _rule(width),
+            _text("스왑 없음 (disabled)", inner),
+            _rule(width),
+        ])
+    return "\n".join([
+        _rule(width),
+        _text(style("Swap", "bold"), inner),
+        _rule(width),
+        _metric("Swap", swap.get("percent"), inner, suffix=f"{human_bytes(swap.get('free'))} free"),
+        _line("Used", human_bytes(swap.get("used")), inner),
+        _line("Free", human_bytes(swap.get("free")), inner),
+        _line("Total", human_bytes(swap.get("total")), inner),
+        _rule(width),
+    ])
+
+
+def render_disk_io(devices: list[dict]) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    lines = [_rule(width), _text(style("Disk I/O", "bold"), inner), _rule(width)]
+    if not devices:
+        lines.append(_text("no disk I/O data", inner))
+    else:
+        for dev in devices:
+            read_s = human_bytes(int(dev["read_bps"])) + "/s"
+            write_s = human_bytes(int(dev["write_bps"])) + "/s"
+            label = dev["device"]
+            lines.append(_line(f"{label:<12}", f"R {read_s:<14}  W {write_s}", inner))
+    lines.append(_rule(width))
     return "\n".join(lines)
 
 
@@ -239,6 +343,18 @@ def render_service(result: dict) -> str:
     return f"Service: {result['name']} {badge(result['status'], status_color)}\n{result['details']}"
 
 
+def render_tool_start(name: str) -> str:
+    return f"  {style('⏺', 'cyan')}  {style(name, 'muted')}"
+
+
+def render_tool_done(name: str, elapsed: float) -> str:
+    return f"  {style('✔', 'green')}  {style(name, 'muted')}  {style(f'({elapsed:.1f}s)', 'muted')}"
+
+
+def render_tool_fail(name: str, elapsed: float) -> str:
+    return f"  {style('✖', 'red')}  {style(name, 'muted')}  {style(f'({elapsed:.1f}s)', 'muted')}"
+
+
 def _process_lines(processes: list[dict]) -> list[str]:
     if not processes:
         return ["no process data"]
@@ -314,8 +430,11 @@ def supports_color() -> bool:
 
 
 def _rule(width: int, position: str = "mid") -> str:
-    del position
-    return style("+" + "-" * (width - 2) + "+", "muted")
+    if position == "top":
+        return style("┌" + "─" * (width - 2) + "┐", "muted")
+    if position == "bottom":
+        return style("└" + "─" * (width - 2) + "┘", "muted")
+    return style("├" + "─" * (width - 2) + "┤", "muted")
 
 
 def _line(label: str, value: str, inner: int) -> str:
@@ -326,7 +445,7 @@ def _line(label: str, value: str, inner: int) -> str:
 def _text(value: str, inner: int) -> str:
     clipped = _clip_ansi(value, inner)
     padding = inner - _visible_len(clipped)
-    return f"{style('|', 'muted')} {clipped}{' ' * padding} {style('|', 'muted')}"
+    return f"{style('│', 'muted')} {clipped}{' ' * padding} {style('│', 'muted')}"
 
 
 def _metric(label: str, value: float | None, inner: int, suffix: str = "") -> str:
@@ -338,10 +457,10 @@ def _metric(label: str, value: float | None, inner: int, suffix: str = "") -> st
 
 def _bar(value: float | None, width: int = 24) -> str:
     if value is None:
-        return "[" + "?" * width + "]"
+        return style("░" * width, "muted")
     filled = max(0, min(width, round((value / 100) * width)))
     color = "green" if value < 70 else "yellow" if value < 85 else "red"
-    return "[" + style("#" * filled, color) + style("-" * (width - filled), "muted") + "]"
+    return style("█" * filled, color) + style("░" * (width - filled), "muted")
 
 
 def _visible_len(value: str) -> int:

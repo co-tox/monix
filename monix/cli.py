@@ -1,43 +1,65 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import shlex
 import sys
+import threading
 import time
 
 from monix import __version__
 from monix.config import Settings
 from monix.core.assistant import answer, infer_service_name, local_answer
-from monix.picker import NO_ARG_COMMANDS, pick
-from monix.tools.logs import follow_log, registry, search_log, tail_log
-from monix.tools.logs.docker import follow_container, list_containers, tail_container
-from monix.tools.logs.nginx import tail_nginx_access
+from monix.picker import NO_ARG_COMMANDS, pick, pick_with_filter
+from monix.tools.logs import follow_log, registry, tail_log
+from monix.tools.logs.docker import follow_container, tail_container
 from monix.tools.services import service_status
-from monix.tools.system import collect_snapshot, top_processes
+from monix.tools.logs.nginx import tail_nginx_access
 from monix.render import (
     clear_screen,
     colorize_log_line,
     prompt,
     render_docker_containers,
+    render_cpu,
+    render_disk,
+    render_disk_io,
     render_log_aliases,
     render_log_list,
     render_log_search,
     render_logs,
     render_nginx_summary,
+    render_memory,
+    render_network,
     render_reply,
     render_processes,
     render_service,
     render_snapshot,
+    render_swap,
     render_welcome,
+    render_memory,
+    render_disk,
+    render_cpu,
+    render_tool_done,
+    render_tool_fail,
+    render_tool_start,
+)
+from monix.tools.system import (
+    collect_snapshot,
+    cpu_usage_percent,
+    disk_info,
+    disk_io,
+    load_average,
+    memory_info,
+    network_io,
+    swap_info,
+    top_processes,
 )
 
 
 HELP = """Commands:
   /status                          서버 상태 (CPU, 메모리, 디스크, 알림)
   /watch [seconds]                 실시간 모니터링 (Ctrl-C로 종료)
-  /top [limit]                     CPU 상위 프로세스
   /log add @alias -app <path>      앱 로그 등록
-  /log add @alias -nginx <path>    Nginx 로그 등록
   /log add @alias -docker <name>   Docker 컨테이너 로그 등록
   /log list                        등록된 로그 목록
   /log docker-list                 실행 중인 Docker 컨테이너 목록
@@ -45,19 +67,110 @@ HELP = """Commands:
   /log @alias [-n lines]           등록된 로그 보기
   /log @alias --search [pattern]   에러/경고 검색 (pattern 생략 시 에러 필터)
   /log @alias --live [-n lines]    등록된 로그 실시간 스트리밍
-  /log /path/to/file [-n lines]    경로 직접 지정 (등록 불필요)
   /log /path/to/file --live        경로 직접 실시간 스트리밍
-  /log remove @alias               로그 등록 해제
   /logs [path] [lines]             로그 직접 보기 (기존)
   /service <name>                  systemd 서비스 상태
-  /ask <question>                  Gemini에게 질문 (GEMINI_API_KEY 필요)
   /clear                           대화 기록 초기화
   /help                            도움말
   /exit                            종료
+  /ask <question>                  Gemini에게 질문 (GEMINI_API_KEY 필요)
+  /log remove @alias               로그 등록 해제
+  /log /path/to/file [-n lines]    경로 직접 지정 (등록 불필요)
+  /log list                        등록된 로그 목록
+  /log add @alias -nginx <path>    Nginx 로그 등록
+  /top [limit]                     CPU 상위 프로세스
+  /memory                 메모리 사용량 상세
+  /disk                   디스크 사용량
+  /cpu                    CPU 사용률 + Load average
+  /swap                   스왑 사용량
+  /net                    네트워크 I/O (인터페이스별 bps)
+  /io                     디스크 I/O (읽기/쓰기 속도)
 
 자연어로도 바로 물어볼 수 있어요:
   "CPU 왜 이렇게 높아?"  "nginx 서비스 확인해줘"  "메모리 언제 부족해질까?"
   "@api 로그에서 에러 확인해줘"  "@nginx timeout 찾아줘"\""""
+
+
+_HISTORY: list[str] = []
+
+
+def _read_line(prompt_str: str) -> str:
+    """readline/input 기반 입력. 한글 IME와 좌우 이동을 유지하고 '/' 단독 입력 시 피커를 연다."""
+    try:
+        import readline as _rl
+    except ImportError:
+        _rl = None
+
+    if _rl is not None:
+        existing = {_rl.get_history_item(i) for i in range(1, _rl.get_current_history_length() + 1)}
+        for entry in _HISTORY:
+            if entry and entry not in existing:
+                _rl.add_history(entry)
+
+    raw = input(prompt_str)
+    if raw.strip() != "/":
+        return raw
+
+    selected = pick_with_filter() or pick()
+    if not selected:
+        return ""
+    if selected in NO_ARG_COMMANDS:
+        return selected
+
+    if _rl is None:
+        return selected
+
+    _rl.set_startup_hook(lambda: _rl.insert_text(selected + " "))
+    try:
+        full = input(prompt()).strip()
+    finally:
+        _rl.set_startup_hook(None)
+    return full or selected
+
+
+class Spinner:
+    _FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, message: str = "") -> None:
+        self._message = message
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        for frame in itertools.cycle(self._FRAMES):
+            if self._stop.is_set():
+                break
+            sys.stdout.write(f"\r  {frame}  {self._message}")
+            sys.stdout.flush()
+            time.sleep(0.08)
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+    def __enter__(self) -> "Spinner":
+        if sys.stdout.isatty():
+            self._thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join()
+
+
+def _run_with_indicator(label: str, fn, *args, **kwargs):
+    if not sys.stdout.isatty():
+        return fn(*args, **kwargs)
+    print(render_tool_start(label))
+    t0 = time.time()
+    try:
+        result = fn(*args, **kwargs)
+        sys.stdout.write(f"\033[A\r\033[K{render_tool_done(label, time.time() - t0)}\n")
+        sys.stdout.flush()
+        return result
+    except Exception:
+        sys.stdout.write(f"\033[A\r\033[K{render_tool_fail(label, time.time() - t0)}\n")
+        sys.stdout.flush()
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,6 +182,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "status":
         print(render_snapshot(collect_snapshot(settings)))
+        return 0
+    if args.command == "cpu":
+        print(render_cpu(cpu_usage_percent(), load_average()))
+        return 0
+    if args.command == "memory":
+        print(render_memory(memory_info()))
+        return 0
+    if args.command == "disk":
+        print(render_disk(disk_info()))
+        return 0
+    if args.command == "swap":
+        print(render_swap(swap_info()))
+        return 0
+    if args.command == "net":
+        print(render_network(network_io()))
+        return 0
+    if args.command == "io":
+        print(render_disk_io(disk_io()))
         return 0
     if args.command == "top":
         print(render_processes(top_processes(args.limit)))
@@ -91,6 +222,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("status", help="show server status")
+    subparsers.add_parser("cpu", help="show CPU usage and load average")
+    subparsers.add_parser("memory", help="show memory usage")
+    subparsers.add_parser("disk", help="show disk usage")
+    subparsers.add_parser("swap", help="show swap usage")
+    subparsers.add_parser("net", help="show network I/O")
+    subparsers.add_parser("io", help="show disk I/O read/write rates")
 
     top_parser = subparsers.add_parser("top", help="show top CPU processes")
     top_parser.add_argument("--limit", "-n", type=int, default=10)
@@ -115,17 +252,12 @@ def repl(settings: Settings | None = None) -> int:
     print(render_welcome(collect_snapshot(settings), settings.gemini_enabled))
     while True:
         try:
-            raw = input(prompt()).strip()
+            raw = _read_line(prompt()).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return 0
         if not raw:
             continue
-
-        if raw == "/":
-            raw = _pick_and_fill()
-            if not raw:
-                continue
 
         if raw in {"/exit", "exit", "quit", "/quit"}:
             return 0
@@ -137,6 +269,10 @@ def repl(settings: Settings | None = None) -> int:
             output = f"Error: {exc} / 오류: {exc}"
         if output:
             print(render_reply(output))
+        if raw:
+            _HISTORY.append(raw)
+            if len(_HISTORY) > 100:
+                _HISTORY.pop(0)
 
 
 def dispatch(raw: str, settings: Settings | None = None, history: list[dict] | None = None) -> str:
@@ -158,28 +294,45 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             history.clear()
         return "Cleared history. / 대화 기록을 초기화했습니다."
     if command == "/status":
-        return render_snapshot(collect_snapshot(settings))
+        snap = _run_with_indicator("snapshot", collect_snapshot, settings)
+        return render_snapshot(snap)
+    if command == "/cpu":
+        return render_cpu(cpu_usage_percent(), load_average())
+    if command == "/memory":
+        return render_memory(memory_info())
+    if command == "/disk":
+        return render_disk(disk_info())
+    if command == "/swap":
+        return render_swap(swap_info())
+    if command == "/net":
+        return render_network(network_io())
+    if command == "/io":
+        return render_disk_io(disk_io())
     if command == "/watch":
         interval = _int_arg(args, 0, 5)
         return watch(interval, settings)
     if command == "/top":
         limit = _int_arg(args, 0, 10)
-        return render_processes(top_processes(limit))
+        procs = _run_with_indicator("top_processes", top_processes, limit)
+        return render_processes(procs)
     if command == "/log":
         return _dispatch_log(args, settings)
     if command == "/logs":
         path = args[0] if args else settings.log_file
         lines = _int_arg(args, 1, 80)
-        return render_logs(tail_log(path, lines))
+        log = _run_with_indicator("tail_log", tail_log, path, lines)
+        return render_logs(log)
     if command == "/service":
         if not args:
-            return "Usage: /service <name> / 사용법: /service <name>"
-        return render_service(service_status(args[0]))
+            return "사용법: /service <name>"
+        svc = _run_with_indicator("service_status", service_status, args[0])
+        return render_service(svc)
     if command == "/ask":
         if not args:
-            return "Usage: /ask <question> / 사용법: /ask <question>"
-        return answer(" ".join(args), settings, history)
-    return f"Unknown command: {command} / 알 수 없는 명령입니다: {command}\nType /help to see available commands."
+            return "사용법: /ask <question>"
+        with Spinner("Gemini에 질문 중..."):
+            return answer(" ".join(args), settings, history)
+    return f"알 수 없는 명령입니다: {command}\n/help를 입력해 사용 가능한 명령을 확인하세요."
 
 
 def dispatch_natural(raw: str, settings: Settings | None = None, history: list[dict] | None = None) -> str:
@@ -192,7 +345,8 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
 
     # Gemini 활성화 시 모든 자연어를 AI로 라우팅 (Claude처럼)
     if settings.gemini_enabled:
-        return answer(raw, settings, history)
+        with Spinner("Gemini에 질문 중..."):
+            return answer(raw, settings, history)
 
     # Local fallback
     lowered = raw.lower()
