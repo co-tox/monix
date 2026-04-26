@@ -1,21 +1,23 @@
 # Monix
 
-Monix is a Claude Code inspired terminal assistant for operating servers from the CLI. It gives you a conversational shell for read-only monitoring tasks such as status checks, process inspection, log tailing, and service health review.
+Monix is a terminal assistant for operating servers from the CLI. It gives you a conversational shell for read-only monitoring tasks such as status checks, process inspection, log tailing, and service health review.
 
-It works without dependencies. If `ANTHROPIC_API_KEY` is set, Monix can ask Claude to analyze the current server snapshot; otherwise it falls back to local intent handling.
+It works without runtime dependencies. If `GEMINI_API_KEY` is set, Monix can ask Gemini to analyze the current server snapshot; otherwise it falls back to local intent handling.
 
 ## Install
 
 From this directory:
 
 ```bash
-python3 -m pip install .
+uv venv
+uv pip install -e ".[dev]"
 ```
 
-For editable development:
+Activate the virtual environment if you want to call `monix` directly:
 
 ```bash
-python3 -m pip install -e ".[dev]"
+source .venv/bin/activate
+monix
 ```
 
 ## Usage
@@ -23,10 +25,10 @@ python3 -m pip install -e ".[dev]"
 Start the interactive CLI:
 
 ```bash
-python3 -m monix.cli
+uv run monix
 ```
 
-This opens the Claude-style terminal UI with a live server summary and a prompt:
+This opens the terminal UI with a live server summary and a prompt:
 
 ```text
 > CPU 상태 봐줘
@@ -45,11 +47,11 @@ To keep that alias, put it in `~/.zshrc` or `~/.bashrc`.
 Run one-shot checks:
 
 ```bash
-monix status
-monix top --limit 10
-monix logs /var/log/syslog --lines 80
-monix service nginx
-monix ask "CPU와 메모리 상태를 보고 위험한 부분을 알려줘"
+uv run monix status
+uv run monix top --limit 10
+uv run monix logs /var/log/syslog --lines 80
+uv run monix service nginx
+uv run monix ask "CPU와 메모리 상태를 보고 위험한 부분을 알려줘"
 ```
 
 Inside the interactive shell:
@@ -78,8 +80,8 @@ nginx 서비스 상태 알려줘
 
 Environment variables:
 
-- `ANTHROPIC_API_KEY`: enables Claude-backed analysis.
-- `MONIX_MODEL`: Claude model name. Defaults to `claude-sonnet-4-5-20250929`.
+- `GEMINI_API_KEY`: enables Gemini-backed analysis.
+- `MONIX_MODEL`: Gemini model name. Defaults to `gemini-1.5-flash`.
 - `MONIX_LOG_FILE`: default log file for `/logs`. Defaults to `/var/log/syslog` when it exists, otherwise `/var/log/messages`.
 - `MONIX_CPU_WARN`: CPU warning threshold percent. Defaults to `85`.
 - `MONIX_MEM_WARN`: memory warning threshold percent. Defaults to `85`.
@@ -97,7 +99,7 @@ monix/
   render.py           # terminal UI rendering
   config/             # environment-backed settings and thresholds
   core/               # assistant intent handling and local answers
-  llm/                # Claude API client
+  llm/                # Gemini API client
   tools/              # read-only monitoring tools
   safety/             # read-only policy definitions
   assistant.py        # backwards-compatible facade
