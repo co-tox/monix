@@ -21,17 +21,18 @@ COMMANDS: list[tuple[str, str]] = [
     ("/logs",           "로그 보기 (기존)  [경로] [줄수]"),
     ("/log",            "로그 관리  add·list·@alias·--live"),
     ("/top",            "프로세스 TOP  [개수]"),
-    ("/watch",          "실시간 모니터링  [초]"),
+    ("/collect",        "수집기  list·set·remove"),
+    ("/watch",          "실시간 모니터링  [all|cpu|memory|…] [초]"),
+    ("/stat",           "스냅샷·이력 조회  [all|cpu|…] [기간]"),
     ("/io",             "디스크 I/O  읽기/쓰기 속도"),
     ("/net",            "네트워크 I/O  인터페이스별 bps"),
     ("/swap",           "스왑 사용량"),
     ("/disk",           "디스크 사용량"),
     ("/memory",         "메모리 사용량 상세"),
     ("/cpu",            "CPU 사용률 + Load average"),
-    ("/stat",    "종합 단발 스냅샷  swap · net · io 포함"),
 ]
 
-NO_ARG_COMMANDS = {"/status", "/stat", "/cpu", "/memory", "/disk", "/swap", "/net", "/io", "/clear", "/help", "/exit"}
+NO_ARG_COMMANDS = {"/stat", "/watch", "/collect", "/cpu", "/memory", "/disk", "/swap", "/net", "/io", "/clear", "/help", "/exit"}
 
 # Fixed height = one slot per command (filter lives on the prompt line itself).
 _PICKER_BLOCK = len(COMMANDS)
