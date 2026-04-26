@@ -14,7 +14,7 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
     if isinstance(question, list):
         question = " ".join(question)
     settings = settings or Settings.from_env()
-    snapshot = collect_snapshot(settings.thresholds)
+    snapshot = collect_snapshot(settings)
     client = GeminiClient(settings.gemini_api_key, settings.model)
 
     if client.enabled:
