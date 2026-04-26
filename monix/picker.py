@@ -45,6 +45,12 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("live",     "<container|@alias> [-n lines]  Real-time stream"),
         ("remove",   "@alias  Unregister alias"),
     ],
+    "/top": [
+        ("cpu",     "[N]  Top N by CPU usage"),
+        ("memory",  "[N]  Top N by memory usage"),
+        ("disk",    "[N]  Disk partitions by usage"),
+        ("all",     "[N]  All of the above  (default: 5)"),
+    ],
     "/watch": [
         ("cpu",     "Watch CPU usage  [sec]"),
         ("memory",  "Watch memory  [sec]"),
@@ -64,7 +70,7 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
 }
 
 NO_ARG_COMMANDS = {
-    "/stat", "/watch", "/collect",
+    "/stat", "/watch", "/collect", "/top",
     "/clear", "/help", "/exit",
     # subcommands that take no further args — Enter immediately submits.
     "/log list",

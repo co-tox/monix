@@ -49,6 +49,7 @@ from monix.render import (
     render_reply,
     render_history,
     render_processes,
+    render_top,
     render_service,
     render_snapshot,
     render_stat,
@@ -71,6 +72,7 @@ from monix.tools.system import (
     memory_info,
     network_io,
     swap_info,
+    all_processes,
     top_processes,
     uptime_seconds_value,
 )
@@ -517,9 +519,18 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         interval, metric = _watch_args(args)
         return watch(interval, settings, metric or None)
     if command == "/top":
-        limit = _int_arg(args, 0, 10)
-        procs = _run_with_indicator("top_processes", top_processes, limit)
-        return render_processes(procs)
+        if not args:
+            return (
+                "Top commands:\n"
+                "  /top cpu    [N]   Top N processes by CPU usage\n"
+                "  /top memory [N]   Top N processes by memory usage\n"
+                "  /top disk   [N]   Disk partitions by usage\n"
+                "  /top all    [N]   All of the above  (default: 5)"
+            )
+        metric, limit = _top_args(args)
+        procs = _run_with_indicator("top", all_processes)
+        disks = disk_info()
+        return render_top(procs, disks, limit, metric)
     if command == "/docker":
         return _dispatch_docker(args, settings)
     if command == "/log":
@@ -723,6 +734,24 @@ def _stat_history(metric: str | None, period: str) -> str:
         return f"Invalid period format: {period}\nExamples: 1d, 24h, 2026-04-25, 2026-04-24~2026-04-26"
     records = load_history(cfg.folder, start, end)
     return render_history(records, metric, label)
+
+
+_TOP_METRICS = {"cpu", "memory", "mem", "disk", "all"}
+
+
+def _top_args(args: list[str]) -> tuple[str, int]:
+    metric = "all"
+    count = 5
+    for a in args:
+        al = a.lower()
+        if al in _TOP_METRICS:
+            metric = al
+        else:
+            try:
+                count = int(a)
+            except ValueError:
+                pass
+    return metric, count
 
 
 def _watch_args(args: list[str]) -> tuple[int, str | None]:

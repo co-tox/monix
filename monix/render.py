@@ -352,6 +352,75 @@ def render_history(records: list[dict], metric: str | None, period_label: str = 
     return "\n".join(lines)
 
 
+def render_top(procs: list[dict], disks: list[dict], count: int, metric: str = "all") -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    m = metric.lower()
+
+    by_cpu  = sorted(procs, key=lambda r: r["cpu"], reverse=True)[:count]
+    by_mem  = sorted(procs, key=lambda r: r["mem"], reverse=True)[:count]
+    by_disk = sorted(disks, key=lambda d: d.get("percent") or 0, reverse=True)
+
+    def _proc_header(label: str) -> list[str]:
+        return [
+            _rule(width),
+            _text(style(label, "cyan"), inner),
+            _text(
+                f"{style('PID', 'muted'):<18} {style('USAGE', 'muted'):>7}  {style('COMMAND', 'muted')}",
+                inner,
+            ),
+        ]
+
+    def _proc_rows(rows: list[dict], key: str) -> list[str]:
+        result = []
+        for p in rows:
+            val = p[key]
+            color = "red" if val >= 50 else "yellow" if val >= 20 else "green"
+            result.append(_text(
+                f"{style(str(p['pid']), 'muted'):<18} {style(f'{val:>5.1f}%', color):>7}  {style(p['command'], 'cyan')}",
+                inner,
+            ))
+        if not rows:
+            result.append(_text(style("no data", "muted"), inner))
+        return result
+
+    def _disk_rows() -> list[str]:
+        result = [
+            _rule(width),
+            _text(style("Disk", "cyan"), inner),
+            _text(
+                f"{style('MOUNT', 'muted'):<22} {style('USED%', 'muted'):>7}  {style('FREE / TOTAL', 'muted')}",
+                inner,
+            ),
+        ]
+        for d in by_disk:
+            pct = d.get("percent") or 0
+            color = "red" if pct >= 90 else "yellow" if pct >= 75 else "green"
+            free_total = f"{human_bytes(d.get('free'))} / {human_bytes(d.get('total'))}"
+            result.append(_text(
+                f"{d.get('path', '?'):<22} {style(f'{pct:>5.1f}%', color):>7}  {free_total}",
+                inner,
+            ))
+        if not by_disk:
+            result.append(_text(style("no disk data", "muted"), inner))
+        return result
+
+    lines = [
+        _rule(width, "top"),
+        _text(f"{style('Top', 'bold')}  {style(metric, 'cyan')}  {style(f'top {count}', 'muted')}", inner),
+    ]
+
+    if m in ("cpu", "all"):
+        lines += [*_proc_header("CPU %"), *_proc_rows(by_cpu, "cpu")]
+    if m in ("memory", "mem", "all"):
+        lines += [*_proc_header("Memory %"), *_proc_rows(by_mem, "mem")]
+    if m in ("disk", "all"):
+        lines += _disk_rows()
+
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
+
+
 def render_processes(processes: list[dict]) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
