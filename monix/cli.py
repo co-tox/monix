@@ -56,9 +56,8 @@ from monix.tools.system import (
 
 
 HELP = """Commands:
-  /status                          서버 상태 (CPU, 메모리, 디스크, 알림)
-  /stat [cpu|memory|disk|swap|net|io]  종합 단발 스냅샷 (인자 없으면 전체, 인자 있으면 해당 항목만)
-  /watch [seconds]                 종합 실시간 대시보드 (기본 2s, Ctrl-C로 종료)
+  /stat [cpu|memory|disk|swap|net|io]  단발 스냅샷 (인자 없으면 전체)
+  /watch [cpu|memory|disk|swap|net|io] [seconds]  실시간 모니터링 (기본 5s, Ctrl-C로 종료)
   /log add @alias -app <path>      앱 로그 등록
   /log add @alias -nginx <path>    Nginx 로그 등록
   /log add @alias -docker <name>   Docker 컨테이너 로그 등록
@@ -181,9 +180,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.version:
         print(f"monix {__version__}")
         return 0
-    if args.command == "status":
-        print(render_snapshot(collect_snapshot(settings)))
-        return 0
     if args.command == "cpu":
         print(render_cpu(cpu_usage_percent(), load_average()))
         return 0
@@ -205,9 +201,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "stat":
         print(stat(settings, getattr(args, "metric", None)))
         return 0
-    if args.command == "watch":
-        watch(args.interval, settings)
-        return 0
     if args.command == "top":
         print(render_processes(top_processes(args.limit)))
         return 0
@@ -228,7 +221,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="store_true", help="show version")
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("status", help="show server status")
     subparsers.add_parser("cpu", help="show CPU usage and load average")
     subparsers.add_parser("memory", help="show memory usage")
     subparsers.add_parser("disk", help="show disk usage")
@@ -238,8 +230,8 @@ def build_parser() -> argparse.ArgumentParser:
     stat_parser = subparsers.add_parser("stat", help="comprehensive one-shot snapshot (cpu/mem/disk/swap/net/io)")
     stat_parser.add_argument("metric", nargs="?", help="cpu|memory|disk|swap|net|io")
 
-    watch_parser = subparsers.add_parser("watch", help="comprehensive live dashboard")
-    watch_parser.add_argument("interval", nargs="?", type=int, default=2)
+    stat_parser = subparsers.add_parser("stat", help="one-shot snapshot (cpu/memory/disk/swap/net/io)")
+    stat_parser.add_argument("metric", nargs="?", help="cpu|memory|disk|swap|net|io")
 
     top_parser = subparsers.add_parser("top", help="show top CPU processes")
     top_parser.add_argument("--limit", "-n", type=int, default=10)
@@ -304,10 +296,7 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
     if command == "/clear":
         if history is not None:
             history.clear()
-        return "Cleared history. / 대화 기록을 초기화했습니다."
-    if command == "/status":
-        snap = _run_with_indicator("snapshot", collect_snapshot, settings)
-        return render_snapshot(snap)
+        return "대화 기록을 초기화했습니다. 새로운 대화를 시작해요!"
     if command == "/stat":
         metric = args[0] if args else None
         return stat(settings, metric)
@@ -324,8 +313,8 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
     if command == "/io":
         return render_disk_io(disk_io())
     if command == "/watch":
-        interval = _int_arg(args, 0, 2)
-        return watch(interval, settings)
+        interval, metric = _watch_args(args)
+        return watch(interval, settings, metric)
     if command == "/top":
         limit = _int_arg(args, 0, 10)
         procs = _run_with_indicator("top_processes", top_processes, limit)
@@ -380,66 +369,65 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
     return local_answer(raw)
 
 
-def _collect_all(settings: Settings) -> tuple[dict, dict, list, list]:
-    """snapshot·swap·net·io를 병렬 수집. net/io는 1초 샘플링."""
-    is_linux = settings.platform not in ("mac", "darwin")
-    results: dict = {}
-
-    def _net() -> None:
-        results["net"] = network_io(is_linux=is_linux, sample_seconds=1.0)
-
-    def _io() -> None:
-        results["io"] = disk_io(is_linux=is_linux, sample_seconds=1.0)
-
-    t1 = threading.Thread(target=_net, daemon=True)
-    t2 = threading.Thread(target=_io, daemon=True)
-    t1.start()
-    t2.start()
-    snapshot = collect_snapshot(settings)
-    swap = swap_info(is_linux=is_linux)
-    t1.join(timeout=3)
-    t2.join(timeout=3)
-    return snapshot, swap, results.get("net", []), results.get("io", [])
-
-
-def stat(settings: Settings | None = None, metric: str | None = None) -> str:
-    settings = settings or Settings.from_env()
-    if metric:
-        return _stat_single(metric, settings)
-    snapshot, swap, net, io = _collect_all(settings)
-    return render_stat(snapshot, swap, net, io)
-
-
-def _stat_single(metric: str, settings: Settings) -> str:
-    is_linux = settings.platform not in ("mac", "darwin")
-    m = metric.lower()
-    if m == "cpu":
-        return render_cpu(cpu_usage_percent(is_linux=is_linux), load_average())
-    if m in ("memory", "mem"):
-        return render_memory(memory_info(is_linux=is_linux))
-    if m == "disk":
-        return render_disk(disk_info())
-    if m == "swap":
-        return render_swap(swap_info(is_linux=is_linux))
-    if m in ("net", "network"):
-        return render_network(network_io(is_linux=is_linux))
-    if m == "io":
-        return render_disk_io(disk_io(is_linux=is_linux))
-    return f"알 수 없는 메트릭: {metric}\n사용 가능: cpu, memory, disk, swap, net, io"
-
-
-def watch(interval: int, settings: Settings | None = None) -> str:
+def watch(interval: int, settings: Settings | None = None, metric: str | None = None) -> str:
     settings = settings or Settings.from_env()
     interval = max(interval, 2)
     try:
         while True:
             snapshot, swap, net, io = _collect_all(settings)
             print("\033[2J\033[H", end="")
-            print(render_stat(snapshot, swap, net, io))
-            print(f"\n  Refreshing every {interval}s · Ctrl-C to stop")
-            time.sleep(max(interval - 1, 1))
+            if metric:
+                print(_stat_single(metric, settings))
+            else:
+                print(render_snapshot(collect_snapshot(settings)))
+            label = f"  [{metric}]" if metric else ""
+            print(f"\nRefreshing every {interval}s{label}. Press Ctrl-C to stop.")
+            time.sleep(interval)
     except KeyboardInterrupt:
         return "watch를 종료했습니다."
+
+
+def stat(settings: Settings | None = None, metric: str | None = None) -> str:
+    settings = settings or Settings.from_env()
+    if metric:
+        return _stat_single(metric, settings)
+    parts = [
+        render_cpu(cpu_usage_percent(), load_average()),
+        render_memory(memory_info()),
+        render_disk(disk_info()),
+        render_swap(swap_info()),
+        render_network(network_io()),
+        render_disk_io(disk_io()),
+    ]
+    return "\n".join(parts)
+
+
+def _stat_single(metric: str, settings: Settings) -> str:
+    m = metric.lower()
+    if m == "cpu":
+        return render_cpu(cpu_usage_percent(), load_average())
+    if m in ("memory", "mem"):
+        return render_memory(memory_info())
+    if m == "disk":
+        return render_disk(disk_info())
+    if m == "swap":
+        return render_swap(swap_info())
+    if m in ("net", "network"):
+        return render_network(network_io())
+    if m == "io":
+        return render_disk_io(disk_io())
+    return f"알 수 없는 메트릭: {metric}\n사용 가능: cpu, memory, disk, swap, net, io"
+
+
+def _watch_args(args: list[str]) -> tuple[int, str | None]:
+    interval = 5
+    metric = None
+    for a in args:
+        try:
+            interval = int(a)
+        except ValueError:
+            metric = a
+    return interval, metric
 
 
 def _pick_and_fill() -> str:
