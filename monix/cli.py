@@ -133,6 +133,17 @@ def _start_collector(cfg: CollectorConfig) -> None:
     _collector_thread.start()
 
 
+def _is_panel_output(text: str) -> bool:
+    """박스 드로잉 패널 출력인지 감지 (render_reply 우회 여부 결정)."""
+    s = text.lstrip("\n")
+    while s.startswith("\033["):
+        end = s.find("m")
+        if end == -1:
+            break
+        s = s[end + 1:]
+    return s.startswith("┌")
+
+
 def _read_line(prompt_str: str) -> str:
     """raw TTY 한 줄 읽기.
 
@@ -488,7 +499,10 @@ def repl(settings: Settings | None = None) -> int:
         except Exception as exc:
             output = f"Error: {exc} / 오류: {exc}"
         if output:
-            print(render_reply(output))
+            if _is_panel_output(output):
+                print("\n" + output)
+            else:
+                print(render_reply(output))
         if raw:
             _HISTORY.append(raw)
             if len(_HISTORY) > 100:
