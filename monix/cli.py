@@ -19,6 +19,7 @@ from monix.render import (
     clear_screen,
     colorize_log_line,
     prompt,
+    render_docker_aliases,
     render_docker_containers,
     render_cpu,
     render_disk,
@@ -80,9 +81,15 @@ HELP = """Commands:
   /log remove @alias               로그 등록 해제
 
   /docker ps                       실행 중인 컨테이너 목록
-  /docker logs <container>         컨테이너 로그 보기 [-n lines]
-  /docker search <container>       에러/패턴 검색 [pattern] [-n lines]
-  /docker live <container>         실시간 로그 스트리밍 [-n lines]
+  /docker add @alias <container>   컨테이너 alias 등록
+  /docker list                     등록된 Docker alias 목록
+  /docker @alias [-n lines]        등록된 컨테이너 로그 보기
+  /docker @alias --search [pat]    에러/패턴 검색
+  /docker @alias --live            실시간 스트리밍
+  /docker remove @alias            alias 해제
+  /docker logs <container>         컨테이너 로그 직접 보기 [-n lines]
+  /docker search <container>       에러/패턴 검색 (직접) [pattern] [-n lines]
+  /docker live <container>         실시간 스트리밍 (직접) [-n lines]
 
   /logs [path] [lines]             로그 직접 보기 (기존)
   /ask <question>                  Gemini에게 질문 (GEMINI_API_KEY 필요)
@@ -409,54 +416,135 @@ def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG00
 
     sub = args[0]
 
-    if sub in ("ps", "list"):
+    # @alias 조회
+    if sub.startswith("@"):
+        alias = sub[1:]
+        if not alias:
+            return render_docker_aliases(registry.load())
+        entry = registry.get(alias)
+        if entry is None:
+            return (
+                f"등록된 컨테이너가 없습니다: @{alias}\n"
+                f"  /docker add @{alias} <container> 로 등록하세요."
+            )
+        if entry.type != "docker":
+            return f"@{alias} 는 docker 타입이 아닙니다. ({entry.type})\n  /log @{alias} 로 접근하세요."
+        container = entry.container or ""
+        if "--live" in args:
+            return _docker_live(container, _get_opt(args, "-n", 20))
+        if "--search" in args:
+            pattern = _get_str_opt(args, "--search")
+            return render_log_search(search_container(container, pattern=pattern, lines=_get_opt(args, "-n", 500)))
+        return render_logs(tail_container(container, _get_opt(args, "-n", 80)))
+
+    if sub == "add":
+        return _docker_add(args[1:])
+
+    if sub == "ps":
         return render_docker_containers(list_containers())
+
+    if sub == "list":
+        return render_docker_aliases(registry.load())
+
+    if sub in ("remove", "rm"):
+        if len(args) < 2:
+            return "사용법: /docker remove @alias"
+        alias = args[1].lstrip("@")
+        entry = registry.get(alias)
+        if entry is not None and entry.type != "docker":
+            return f"@{alias} 는 docker 타입이 아닙니다. /log remove @{alias} 를 사용하세요."
+        return f"@{alias} 제거 완료." if registry.remove(alias) else f"@{alias} 를 찾을 수 없습니다."
 
     if sub == "logs":
         if len(args) < 2:
-            return "사용법: /docker logs <container> [-n lines]"
-        container = args[1]
-        n = _get_opt(args, "-n", 80)
-        return render_logs(tail_container(container, n))
+            return "사용법: /docker logs <container|@alias> [-n lines]"
+        container, err = _resolve_docker_container(args[1])
+        if err:
+            return err
+        return render_logs(tail_container(container, _get_opt(args, "-n", 80)))
 
     if sub == "search":
         if len(args) < 2:
-            return "사용법: /docker search <container> [pattern] [-n lines]"
-        container = args[1]
+            return "사용법: /docker search <container|@alias> [pattern] [-n lines]"
+        container, err = _resolve_docker_container(args[1])
+        if err:
+            return err
         pattern_candidates = [a for a in args[2:] if not a.startswith("-")]
         pattern = pattern_candidates[0] if pattern_candidates else None
-        n = _get_opt(args, "-n", 500)
-        return render_log_search(search_container(container, pattern=pattern, lines=n))
+        return render_log_search(search_container(container, pattern=pattern, lines=_get_opt(args, "-n", 500)))
 
     if sub == "live":
         if len(args) < 2:
-            return "사용법: /docker live <container> [-n lines]"
-        container = args[1]
-        n = _get_opt(args, "-n", 20)
-        from monix.render import style
-        print(f"\n  {style('→', 'cyan')} docker://{container}  Ctrl-C to stop / Ctrl-C 로 종료\n")
-        try:
-            for line in follow_container(container, n):
-                if line is None:
-                    break
-                print("  " + colorize_log_line(line))
-        except KeyboardInterrupt:
-            pass
-        except Exception as exc:
-            return f"Streaming error: {exc} / 스트리밍 오류: {exc}"
-        return "Stopped streaming. / 스트리밍을 종료했습니다."
+            return "사용법: /docker live <container|@alias> [-n lines]"
+        container, err = _resolve_docker_container(args[1])
+        if err:
+            return err
+        return _docker_live(container, _get_opt(args, "-n", 20))
 
     return _docker_help()
+
+
+def _resolve_docker_container(name: str) -> tuple[str, str | None]:
+    """Return (container_name, None) or ("", error_message).
+
+    If name starts with '@', looks up the alias in registry and returns its
+    container. Otherwise passes the name through unchanged.
+    """
+    if not name.startswith("@"):
+        return name, None
+    alias = name[1:]
+    entry = registry.get(alias)
+    if entry is None:
+        return "", (
+            f"등록된 컨테이너가 없습니다: {name}\n"
+            f"  /docker add @{alias} <container> 로 등록하세요."
+        )
+    if entry.type != "docker":
+        return "", f"@{alias} 는 docker 타입이 아닙니다. ({entry.type})"
+    return entry.container or "", None
+
+
+def _docker_add(args: list[str]) -> str:
+    if not args or not args[0].startswith("@"):
+        return "사용법: /docker add @alias <container>"
+    alias = args[0][1:]
+    if not alias:
+        return "alias를 입력해주세요. 예: /docker add @myapp myapp"
+    positional = [a for a in args[1:] if not a.startswith("-")]
+    container = positional[0] if positional else alias
+    _, is_new = registry.add(alias, "docker", container=container)
+    action = "등록" if is_new else "업데이트"
+    return f"[{action}] Docker 컨테이너: @{alias} → {container}"
+
+
+def _docker_live(container: str, n: int) -> str:
+    from monix.render import style
+    print(f"\n  {style('→', 'cyan')} docker://{container}  Ctrl-C to stop / Ctrl-C 로 종료\n")
+    try:
+        for line in follow_container(container, n):
+            if line is None:
+                break
+            print("  " + colorize_log_line(line))
+    except KeyboardInterrupt:
+        pass
+    except Exception as exc:
+        return f"Streaming error: {exc} / 스트리밍 오류: {exc}"
+    return "Stopped streaming. / 스트리밍을 종료했습니다."
 
 
 def _docker_help() -> str:
     return (
         "Docker 명령어:\n"
         "  /docker ps                              실행 중인 컨테이너 목록\n"
-        "  /docker logs <container> [-n lines]     컨테이너 로그 보기\n"
-        "  /docker search <container> [pattern]    에러/패턴 검색 (pattern 생략 시 에러 필터)\n"
-        "  /docker search <container> [pattern] -n 1000  검색 범위 지정\n"
-        "  /docker live <container> [-n lines]     실시간 로그 스트리밍"
+        "  /docker add @alias <container>          컨테이너 등록\n"
+        "  /docker list                            등록된 Docker alias 목록\n"
+        "  /docker @alias [-n lines]               등록된 컨테이너 로그 보기\n"
+        "  /docker @alias --search [pattern]       에러/패턴 검색\n"
+        "  /docker @alias --live [-n lines]        실시간 스트리밍\n"
+        "  /docker remove @alias                   등록 해제\n"
+        "  /docker logs <container> [-n lines]     컨테이너 로그 직접 보기\n"
+        "  /docker search <container> [pattern]    에러/패턴 검색 (직접)\n"
+        "  /docker live <container> [-n lines]     실시간 스트리밍 (직접)"
     )
 
 

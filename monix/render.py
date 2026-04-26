@@ -333,9 +333,26 @@ def render_docker_containers(containers: list) -> str:
     hints = ["", style("Registration Commands:", "cyan")]
     for c in containers:
         name = c["name"]
-        hints.append(f"  /log add @{name:<16} -docker {name}")
+        hints.append(f"  /docker add @{name:<16} {name}")
 
     return "\n".join(["Running Docker Containers", "", *rows, *hints])
+
+
+def render_docker_aliases(entries: list) -> str:
+    docker_entries = [e for e in entries if e.type == "docker"]
+    if not docker_entries:
+        return (
+            "등록된 Docker 컨테이너가 없습니다.\n"
+            "  /docker add @alias <container> 로 등록하세요.\n"
+            "  실행 중인 컨테이너 목록: /docker ps"
+        )
+    rows = [style(f"  {'ALIAS':<22} CONTAINER", "bold")]
+    for e in docker_entries:
+        rows.append(f"  @{e.alias:<21} {e.container or '(none)'}")
+    hints = ["", style("Commands:", "cyan")]
+    for e in docker_entries:
+        hints.append(f"  /docker @{e.alias:<18} 로그 보기  |  --live  |  --search")
+    return "\n".join(["Registered Docker Aliases", "", *rows, *hints])
 
 
 def render_service(result: dict) -> str:

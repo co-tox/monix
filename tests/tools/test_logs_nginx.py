@@ -323,8 +323,7 @@ def test_render_docker_containers_table_content():
 
 def test_render_docker_containers_shows_registration_hints():
     rendered = render_docker_containers(_CONTAINERS)
-    assert "/log add" in rendered
-    assert "-docker" in rendered
+    assert "/docker add" in rendered
     assert "web" in rendered
 
 
