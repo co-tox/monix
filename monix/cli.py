@@ -84,14 +84,18 @@ HELP = """Commands:
   /swap                            Swap usage
   /net                             Network I/O
   /io                              Disk I/O
-  /top [limit]                     Top processes (default 10)
+  /top [cpu|memory|disk|all] [N]   Top processes
+  /top help                        Show /top usage details
   /service <name>                  Check systemd service status
 
   /stat [all|cpu|mem|disk|swap|net|io]  Snapshot or history view
+  /stat help                       Show /stat usage details
   /watch [all|cpu|mem|disk|swap|net|io] [sec]  Real-time monitoring
+  /watch help                      Show /watch usage details
   /collect list                    Show collector configuration
   /collect set <interval> <retention> <folder>  Configure collector
   /collect remove                  Disable and remove collector
+  /collect help                    Show /collect usage details
   /log add @alias -app <path>      Register app log
   /log add @alias -nginx <path>    Register Nginx log
   /log add @alias -docker <name>   Register Docker container log
@@ -103,6 +107,7 @@ HELP = """Commands:
   /log /path/to/file [-n lines]    Direct path view (no registration needed)
   /log /path/to/file --live        Direct path real-time streaming
   /log remove @alias               Unregister log
+  /log help                        Show /log usage details
 
   /docker ps                       List running containers
   /docker stats [container]        Resource usage (CPU/mem/net/io)
@@ -117,6 +122,7 @@ HELP = """Commands:
   /docker logs <container>         View container logs directly [-n lines]
   /docker search <container> [pattern] [-n lines]  Search error/pattern (direct)
   /docker live <container>         Real-time streaming (direct) [-n lines]
+  /docker help                     Show /docker usage details
 
   /logs <path> [lines]             Direct log view
   /ask <question>                  Ask Gemini (requires GEMINI_API_KEY)
@@ -513,13 +519,17 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             history.clear()
         return "Conversation history cleared. Let's start a new one!"
     if command == "/stat":
+        if args and args[0] == "help":
+            return _STAT_HELP
         metric, period = _stat_args(args)
         return stat(settings, metric, period)
     if command == "/watch":
+        if args and args[0] == "help":
+            return _WATCH_HELP
         interval, metric = _watch_args(args)
         return watch(interval, settings, metric or None)
     if command == "/top":
-        if not args:
+        if not args or args[0] == "help":
             return (
                 "Top commands:\n"
                 "  /top cpu    [N]   Top N processes by CPU usage\n"
@@ -615,6 +625,7 @@ _WATCH_HELP = (
     "  /watch io              Real-time disk I/O\n"
     "\n"
     "  Update interval (sec) can be added at the end:\n"
+    "  /watch all 2           Update dashboard every 2 seconds\n"
     "  /watch cpu 10          Update CPU every 10 seconds"
 )
 
@@ -792,7 +803,7 @@ def main():
 
 
 def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG001
-    if not args:
+    if not args or args[0] == "help":
         return _docker_help()
 
     sub = args[0]
@@ -822,7 +833,7 @@ def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG00
             return _docker_live(container, _get_opt(args, "-n", 20))
         if "--search" in args:
             pattern = _get_str_opt(args, "--search")
-            return render_log_search(search_container(container, pattern=pattern, lines=_get_opt(args, "-n", 500)))
+            return render_log_search(search_container(container, pattern=pattern, lines=_get_opt(args, "-n", 0)))
         return render_logs(tail_container(container, _get_opt(args, "-n", 80)))
 
     if sub == "add":
@@ -865,7 +876,7 @@ def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG00
             return err
         pattern_candidates = [a for a in args[2:] if not a.startswith("-")]
         pattern = pattern_candidates[0] if pattern_candidates else None
-        return render_log_search(search_container(container, pattern=pattern, lines=_get_opt(args, "-n", 500)))
+        return render_log_search(search_container(container, pattern=pattern, lines=_get_opt(args, "-n", 0)))
 
     if sub == "live":
         if len(args) < 2:
@@ -973,7 +984,7 @@ def _docker_help() -> str:
 
 
 def _dispatch_log(args: list[str], settings: Settings) -> str:
-    if not args:
+    if not args or args[0] == "help":
         return _log_help()
 
     sub = args[0]
@@ -1008,7 +1019,7 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
                 return _live_log(entry, n)
             if "--search" in args:
                 pattern = _get_str_opt(args, "--search")
-                return _log_search_entry(entry, pattern, lines=_get_opt(args, "-n", 500))
+                return _log_search_entry(entry, pattern, lines=_get_opt(args, "-n", 0))
             if entry.type == "docker":
                 return render_logs(tail_container(entry.container or "", n))
             if entry.type == "nginx":
@@ -1306,7 +1317,7 @@ def _extract_search_pattern(text: str, alias: str) -> str | None:
     return candidates[0] if candidates else None
 
 
-def _log_search_entry(entry, pattern: str | None, lines: int = 500) -> str:
+def _log_search_entry(entry, pattern: str | None, lines: int = 0) -> str:
     """Run search on a log entry and render the result."""
     if entry.type == "docker":
         result = search_container(entry.container or "", pattern=pattern, lines=lines)
@@ -1386,7 +1397,7 @@ def _fmt_duration(days: float) -> str:
 
 
 def _dispatch_collect(args: list[str]) -> str:
-    if not args:
+    if not args or args[0] == "help":
         return (
             "Collector commands:\n"
             "  /collect list                    Show current configuration\n"

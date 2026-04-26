@@ -81,17 +81,19 @@ def classify_line(line: str) -> Severity:
 def search_log(
     path: str | Path,
     pattern: str | None = None,
-    lines: int = DEFAULT_SEARCH_LINES,
+    lines: int = 0,
 ) -> SearchResult:
-    """Search last N lines of a log file.
+    """Search a log file.
 
+    lines=0 (default) → entire file.
+    lines>0 → last N lines only.
     pattern=None → returns only error/warn lines.
     pattern=<str> → returns lines matching the regex (case-insensitive).
     If pattern is an invalid regex, falls back to literal match and sets
     result['warning'].
     """
-    if lines < 1:
-        raise ValueError(f"lines must be >= 1, got {lines}")
+    if lines < 0:
+        raise ValueError(f"lines must be >= 0, got {lines}")
     log_path = Path(path).expanduser()
     if not log_path.exists():
         return {"path": str(log_path), "status": "missing", "query": pattern, "total_scanned": 0, "matches": []}
@@ -101,16 +103,14 @@ def search_log(
     if log_path.suffix.lower() in _COMPRESSED_SUFFIXES:
         try:
             with _open_compressed(log_path) as fh:
-                all_lines = fh.read().splitlines()[-lines:]
+                raw = fh.read().splitlines()
+                all_lines = raw[-lines:] if lines > 0 else raw
         except (OSError, EOFError) as exc:
             return {"path": str(log_path), "status": "error", "query": pattern, "total_scanned": 0, "matches": [str(exc)]}
     else:
         try:
-            output = subprocess.check_output(
-                ["tail", "-n", str(lines), str(log_path)],
-                text=True,
-                timeout=5,
-            )
+            cmd = ["tail", "-n", str(lines), str(log_path)] if lines > 0 else ["cat", str(log_path)]
+            output = subprocess.check_output(cmd, text=True, timeout=30)
         except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
             return {"path": str(log_path), "status": "error", "query": pattern, "total_scanned": 0, "matches": [str(exc)]}
         all_lines = output.splitlines()

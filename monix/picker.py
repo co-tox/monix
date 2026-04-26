@@ -27,10 +27,17 @@ COMMANDS: list[tuple[str, str]] = [
 # Subcommand options revealed when the user types "<command> " (trailing space)
 # in the picker — e.g. "log " expands to /log add, /log list, /log remove, ...
 SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
+    "/collect": [
+        ("list",    "Show current configuration"),
+        ("set",     "<interval> <retention> <folder>  Configure collector"),
+        ("remove",  "Disable and remove collector"),
+        ("help",    "Show /collect usage details"),
+    ],
     "/log": [
         ("add",          "@alias -app|-nginx|-docker <path>  Register log"),
         ("list",         "List registered logs"),
         ("remove",       "@alias  Unregister log"),
+        ("help",         "Show /log usage details"),
     ],
     "/docker": [
         ("ps",       "List running containers"),
@@ -43,37 +50,45 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("search",   "<container|@alias> [pattern]  Search patterns"),
         ("live",     "<container|@alias> [-n lines]  Real-time stream"),
         ("remove",   "@alias  Unregister alias"),
+        ("help",     "Show /docker usage details"),
     ],
     "/top": [
         ("cpu",     "[N]  Top N by CPU usage"),
         ("memory",  "[N]  Top N by memory usage"),
         ("disk",    "[N]  Disk partitions by usage"),
         ("all",     "[N]  All of the above  (default: 5)"),
+        ("help",    "Show /top usage details"),
     ],
     "/watch": [
+        ("all",     "[sec]  Watch all metrics  (default)"),
         ("cpu",     "Watch CPU usage  [sec]"),
         ("memory",  "Watch memory  [sec]"),
         ("disk",    "Watch disk  [sec]"),
         ("swap",    "Watch swap  [sec]"),
         ("net",     "Watch network  [sec]"),
         ("io",      "Watch disk I/O  [sec]"),
+        ("help",    "Show /watch usage details"),
     ],
     "/stat": [
+        ("all",     "[N]  All metrics snapshot  (default)"),
         ("cpu",     "CPU snapshot"),
         ("memory",  "Memory snapshot"),
         ("disk",    "Disk snapshot"),
         ("swap",    "Swap snapshot"),
         ("net",     "Network snapshot"),
         ("io",      "Disk I/O snapshot"),
+        ("help",    "Show /stat usage details"),
     ],
 }
 
 NO_ARG_COMMANDS = {
-    "/stat", "/watch", "/collect", "/top",
+    "/stat", "/watch", "/collect",
     "/clear", "/help", "/exit",
     # subcommands that take no further args — Enter immediately submits.
-    "/log list",
-    "/docker ps", "/docker list", "/docker stats",
+    "/log list", "/log help",
+    "/stat help", "/watch help",
+    "/top help", "/collect list", "/collect help",
+    "/docker ps", "/docker list", "/docker stats", "/docker help",
 }
 
 # Fixed height = max(top-level, longest subcommand list) so subcommand views
@@ -177,8 +192,8 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         # P: Prompt + inline filter
         out.append(f"\033[K{prompt_prefix}{_filter_inline()}")
 
-        # P+1 ~ P+N: Item slots (always N slots, empty lines if no content)
-        for i in range(N):
+        # P+1 ~ P+BLOCK: Item slots (BLOCK rows reserved; empties at bottom if fewer items)
+        for i in range(BLOCK):
             out.append("\033[1B\r")
             if not items:
                 content = "\033[2m  (No matching commands)\033[0m" if i == 0 else ""
@@ -198,7 +213,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
             out.append(f"\033[K  {content}" if content else "\033[K")
 
         # Restore cursor to P q_cursor col
-        # Currently at P+N -> move back up to P col 0
+        # Currently at P+BLOCK -> move back up to P col 0
         out.append(f"\033[{BLOCK}A\r")
         # Prompt width + '/' char (1) + query prefix width
         q_col = _vis_width(prompt_prefix) + 1 + _q_width(query_buf[:q_cursor])
