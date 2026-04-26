@@ -1,6 +1,9 @@
-# monix/tools/logs — 로그 모니터링 모듈
+# monix/tools/logs — Log Monitoring Module / 로그 모니터링 모듈
 
-## 개요
+## Overview / 개요
+
+A collection of tools to view and stream server application logs, Nginx logs, and Docker container logs.
+All features adhere to the **Read-only** principle and use only the Python standard library.
 
 서버 애플리케이션 로그, Nginx 로그, Docker 컨테이너 로그를 조회·스트리밍하는 도구 모음.
 모든 기능은 **읽기 전용(Read-only)** 원칙을 준수하며, Python 표준 라이브러리만 사용한다.

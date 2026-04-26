@@ -44,8 +44,8 @@ def render_welcome(snapshot: dict, gemini_enabled: bool) -> str:
         _line("Load", _load(snapshot.get("load_average")), inner),
         _line("Status", alert_text, inner),
         _rule(width, "mid"),
-        _text(f"{style('뭐든 물어봐!', 'bold')}  CPU 상태 봐줘    nginx 왜 느려?    메모리 분석해줘", inner),
-        _text(f"{style('/help', 'cyan')} 명령 목록   {style('/clear', 'cyan')} 대화 초기화   {style('/watch 5', 'cyan')} 실시간   {style('/exit', 'cyan')} 종료", inner),
+        _text(f"{style('Ask me anything!', 'bold')}  CPU 상태 봐줘    nginx 왜 느려?    Memory analysis", inner),
+        _text(f"{style('/help', 'cyan')} Commands   {style('/clear', 'cyan')} Clear history   {style('/watch 5', 'cyan')} Real-time   {style('/exit', 'cyan')} Exit", inner),
         _rule(width, "bottom"),
     ]
     return "\n".join(lines)
@@ -111,18 +111,18 @@ def render_logs(result: dict) -> str:
 
 def render_log_list(entries: list) -> str:
     if not entries:
-        return "등록된 로그가 없습니다.\n  /log add @alias -app /path/to/file 로 등록하세요."
+        return "No logs registered. / 등록된 로그가 없습니다.\n  Register with: /log add @alias -app /path/to/file"
     rows = [style(f"{'ALIAS':<22} {'TYPE':<8} PATH / CONTAINER", "bold")]
     for e in entries:
-        target = e.path or e.container or "(없음)"
+        target = e.path or e.container or "(none)"
         rows.append(f"@{e.alias:<21} {e.type:<8} {target}")
     return "\n".join(rows)
 
 
 def render_log_aliases(alias_list: list[str]) -> str:
     if not alias_list:
-        return "등록된 로그가 없습니다. /log add 로 등록하세요."
-    return "\n".join(["등록된 로그 (alias):", *(f"  @{a}" for a in alias_list)])
+        return "No logs registered. Register with /log add."
+    return "\n".join(["Registered log aliases:", *(f"  @{a}" for a in alias_list)])
 
 
 def colorize_log_line(line: str) -> str:
@@ -138,21 +138,21 @@ def render_log_search(result: dict) -> str:
     status = result["status"]
 
     if status != "ok":
-        return f"Log 검색: {path} {badge(status, 'red')}"
+        return f"Log Search: {path} {badge(status, 'red')}"
 
     query = result.get("query")
     total = result.get("total_scanned", 0)
     matches: list[dict] = result.get("matches", [])
 
-    query_label = f'패턴 "{query}"' if query else "에러/경고"
+    query_label = f'Pattern "{query}"' if query else "Error/Warn"
     error_count = sum(1 for m in matches if m["severity"] == "error")
     warn_count = sum(1 for m in matches if m["severity"] == "warn")
     found_color = "red" if error_count else "yellow" if warn_count else "green"
-    found_text = f"{len(matches)}건 발견" if matches else "이상 없음"
+    found_text = f"{len(matches)} found" if matches else "Healthy"
 
     lines = [
         f"Log: {path}",
-        f"{style(query_label, 'cyan')} 검색 — 스캔 {total:,}줄  {badge(found_text, found_color)}",
+        f"{style(query_label, 'cyan')} Search — scanned {total:,} lines  {badge(found_text, found_color)}",
     ]
 
     if not matches:
@@ -166,8 +166,8 @@ def render_log_search(result: dict) -> str:
 
     lines += [
         "",
-        f"  에러 {style(str(error_count) + '건', 'red' if error_count else 'green')}  "
-        f"경고 {style(str(warn_count) + '건', 'yellow' if warn_count else 'green')}",
+        f"  Error {style(str(error_count), 'red' if error_count else 'green')}  "
+        f"Warn {style(str(warn_count), 'yellow' if warn_count else 'green')}",
     ]
     return "\n".join(lines)
 
@@ -181,14 +181,14 @@ def render_nginx_summary(result: dict) -> str:
 
     total = summary.get("total", 0)
     if total == 0:
-        return "\n".join([header, "", "파싱된 라인이 없습니다. (nginx Combined Log Format 확인 필요)"])
+        return "\n".join([header, "", "No parsed lines. / 파싱된 라인이 없습니다."])
 
     lines = [
         header,
         "",
-        f"{style('Nginx Access Log 요약', 'bold')} — 총 {total:,}건",
+        f"{style('Nginx Access Log Summary', 'bold')} — total {total:,}",
         "",
-        style("상태 코드:", "cyan"),
+        style("Status Codes:", "cyan"),
     ]
 
     status_dist: dict = summary.get("status_dist", {})
@@ -200,25 +200,25 @@ def render_nginx_summary(result: dict) -> str:
 
     top_paths: list = summary.get("top_paths", [])
     if top_paths:
-        lines += ["", style("상위 경로 (Top 10):", "cyan")]
+        lines += ["", style("Top Paths (Top 10):", "cyan")]
         for path, count in top_paths:
             lines.append(f"  {path:<40} {count:>6,}")
 
     top_ips: list = summary.get("top_ips", [])
     if top_ips:
-        lines += ["", style("상위 IP (Top 10):", "cyan")]
+        lines += ["", style("Top IPs (Top 10):", "cyan")]
         for ip, count in top_ips:
             lines.append(f"  {ip:<30} {count:>6,}")
 
     error_count = len(summary.get("error_lines", []))
-    lines += ["", f"4xx/5xx 에러: {style(str(error_count) + '건', 'red' if error_count else 'green')}"]
+    lines += ["", f"Errors (4xx/5xx): {style(str(error_count), 'red' if error_count else 'green')}"]
 
     return "\n".join(lines)
 
 
 def render_docker_containers(containers: list) -> str:
     if not containers:
-        return "실행 중인 컨테이너가 없습니다. Docker가 설치되어 있는지 확인하세요."
+        return "No running containers found. / 실행 중인 컨테이너가 없습니다."
 
     rows = [
         style(f"  {'NAME':<22} {'STATUS':<22} IMAGE", "bold"),
@@ -226,12 +226,12 @@ def render_docker_containers(containers: list) -> str:
     for c in containers:
         rows.append(f"  {c['name']:<22} {c['status']:<22} {c['image']}")
 
-    hints = ["", style("등록 명령어:", "cyan")]
+    hints = ["", style("Registration Commands:", "cyan")]
     for c in containers:
         name = c["name"]
         hints.append(f"  /log add @{name:<16} -docker {name}")
 
-    return "\n".join(["실행 중인 Docker 컨테이너", "", *rows, *hints])
+    return "\n".join(["Running Docker Containers", "", *rows, *hints])
 
 
 def render_service(result: dict) -> str:

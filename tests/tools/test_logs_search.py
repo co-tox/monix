@@ -254,6 +254,29 @@ def test_log_search_natural_tail_intent(tmp_path, monkeypatch):
     assert "Log:" in result
 
 
+def test_log_search_natural_all_lines_keyword(tmp_path, monkeypatch):
+    """'전체 로그 중' should scan all lines (999999), not just default 500."""
+    reg_file = tmp_path / ".monix" / "log_registry.json"
+    monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_DIR", tmp_path / ".monix")
+    monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_FILE", reg_file)
+    reg_file.parent.mkdir(parents=True)
+    log_file = tmp_path / "app.log"
+    log_file.write_text("WARN: old warning\n" * 600 + "INFO: ok\n")
+    reg_file.write_text(json.dumps([{"alias": "application", "type": "app", "path": str(log_file), "container": None}]))
+
+    captured = {}
+
+    def fake_check_output(cmd, **kwargs):
+        captured["lines_arg"] = int(cmd[cmd.index("-n") + 1])
+        return "WARN: old warning\n" * 5
+
+    with patch("monix.tools.logs.app.subprocess.check_output", side_effect=fake_check_output):
+        from monix.cli import _log_search_natural
+        _log_search_natural("application", "@application의 전체 로그 중 WARN 로그만 보여주세요.")
+
+    assert captured["lines_arg"] == 999999
+
+
 def test_log_search_natural_error_filter(tmp_path, monkeypatch):
     reg_file = tmp_path / ".monix" / "log_registry.json"
     monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_DIR", tmp_path / ".monix")

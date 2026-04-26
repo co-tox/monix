@@ -132,9 +132,9 @@ def repl(settings: Settings | None = None) -> int:
         try:
             output = dispatch(raw, settings, history)
         except KeyboardInterrupt:
-            output = "중단했습니다."
+            output = "Interrupted. / 중단했습니다."
         except Exception as exc:
-            output = f"오류: {exc}"
+            output = f"Error: {exc} / 오류: {exc}"
         if output:
             print(render_reply(output))
 
@@ -156,7 +156,7 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
     if command == "/clear":
         if history is not None:
             history.clear()
-        return "대화 기록을 초기화했습니다. 새로운 대화를 시작해요!"
+        return "Cleared history. / 대화 기록을 초기화했습니다."
     if command == "/status":
         return render_snapshot(collect_snapshot(settings))
     if command == "/watch":
@@ -173,13 +173,13 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         return render_logs(tail_log(path, lines))
     if command == "/service":
         if not args:
-            return "사용법: /service <name>"
+            return "Usage: /service <name> / 사용법: /service <name>"
         return render_service(service_status(args[0]))
     if command == "/ask":
         if not args:
-            return "사용법: /ask <question>"
+            return "Usage: /ask <question> / 사용법: /ask <question>"
         return answer(" ".join(args), settings, history)
-    return f"알 수 없는 명령입니다: {command}\n/help를 입력해 사용 가능한 명령을 확인하세요."
+    return f"Unknown command: {command} / 알 수 없는 명령입니다: {command}\nType /help to see available commands."
 
 
 def dispatch_natural(raw: str, settings: Settings | None = None, history: list[dict] | None = None) -> str:
@@ -261,11 +261,11 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
             entry = registry.get(alias)
             if entry is None:
                 known = registry.aliases()
-                hint = "\n".join(f"  @{a}" for a in known) if known else "  (없음)"
+                hint = "\n".join(f"  @{a}" for a in known) if known else "  (none)"
                 return (
-                    f"등록된 로그가 없습니다: @{alias}\n\n"
-                    f"등록된 alias:\n{hint}\n\n"
-                    f"/log add @{alias} -app /path/to/file 로 등록하세요."
+                    f"Log not registered: @{alias} / 등록된 로그가 없습니다: @{alias}\n\n"
+                    f"Registered aliases:\n{hint}\n\n"
+                    f"Use /log add @{alias} -app /path/to/file to register."
                 )
             n = _get_opt(args, "-n", 80)
             if "--live" in args:
@@ -285,15 +285,15 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
         n = _get_opt(args, "-n", 80)
         if "--live" in args:
             from monix.render import style
-            print(f"\n  {style('→', 'cyan')} {raw_path}  Ctrl-C 로 종료\n")
+            print(f"\n  {style('→', 'cyan')} {raw_path}  Ctrl-C to stop / Ctrl-C 로 종료\n")
             try:
                 for line in follow_log(raw_path, n):
                     print("  " + colorize_log_line(line))
             except KeyboardInterrupt:
                 pass
             except Exception as exc:
-                return f"스트리밍 오류: {exc}"
-            return "스트리밍을 종료했습니다."
+                return f"Streaming error: {exc} / 스트리밍 오류: {exc}"
+            return "Stopped streaming. / 스트리밍을 종료했습니다."
         return render_logs(tail_log(raw_path, n))
 
     if sub == "add":
@@ -358,11 +358,11 @@ def _live_log(entry, initial_lines: int) -> str:
 
     if entry.type == "docker":
         container = entry.container or ""
-        print(f"\n  {style('→', 'cyan')} docker://{container}  Ctrl-C 로 종료\n")
+        print(f"\n  {style('→', 'cyan')} docker://{container}  Ctrl-C to stop / Ctrl-C 로 종료\n")
         gen = follow_container(container, initial_lines)
     else:
         path = entry.path or ""
-        print(f"\n  {style('→', 'cyan')} @{entry.alias}  {path}  Ctrl-C 로 종료\n")
+        print(f"\n  {style('→', 'cyan')} @{entry.alias}  {path}  Ctrl-C to stop / Ctrl-C 로 종료\n")
         gen = follow_log(path, initial_lines)
 
     try:
@@ -371,8 +371,8 @@ def _live_log(entry, initial_lines: int) -> str:
     except KeyboardInterrupt:
         pass
     except Exception as exc:
-        return f"스트리밍 오류: {exc}"
-    return "스트리밍을 종료했습니다."
+        return f"Streaming error: {exc} / 스트리밍 오류: {exc}"
+    return "Stopped streaming. / 스트리밍을 종료했습니다."
 
 
 def _log_help() -> str:
@@ -442,6 +442,10 @@ _LOG_SEARCH_INTENTS = frozenset({
 _LOG_SEARCH_STOPWORDS = frozenset({
     "로그", "를", "을", "에서", "에", "의", "로", "은", "는", "이",
     "해줘", "줘", "log", "logs", "the", "in", "for", "a", "an",
+})
+
+_ALL_LINES_KEYWORDS = frozenset({
+    "전체", "모두", "전부", "all", "entire", "full", "whole",
 })
 
 
@@ -580,7 +584,9 @@ def _log_search_natural(alias: str, text: str) -> str:
 
     # intent == "search"
     pattern = _extract_search_pattern(text, alias)
-    return _log_search_entry(entry, pattern)
+    tokens = {t.strip("@.,?!:；。").lower() for t in text.split()}
+    scan_lines = 999999 if tokens & _ALL_LINES_KEYWORDS else 2000
+    return _log_search_entry(entry, pattern, lines=scan_lines)
 
 
 if __name__ == "__main__":
