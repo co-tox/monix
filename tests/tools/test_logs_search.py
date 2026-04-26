@@ -110,7 +110,7 @@ def test_detect_log_alias_found(tmp_path, monkeypatch):
     reg_file.write_text(json.dumps([{"alias": "api", "type": "app", "path": "/x.log", "container": None}]))
 
     from monix.cli import _detect_log_alias
-    assert _detect_log_alias("@api 로그 에러 확인해줘") == "api"
+    assert _detect_log_alias("check @api log errors") == "api"
 
 
 def test_detect_log_alias_not_registered(tmp_path, monkeypatch):
@@ -119,16 +119,16 @@ def test_detect_log_alias_not_registered(tmp_path, monkeypatch):
     monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_FILE", reg_file)
 
     from monix.cli import _detect_log_alias
-    assert _detect_log_alias("@ghost 로그 에러 확인해줘") is None
+    assert _detect_log_alias("check @ghost log errors") is None
 
 
 def test_detect_log_alias_no_at_sign():
     from monix.cli import _detect_log_alias
-    assert _detect_log_alias("로그 에러 확인해줘") is None
+    assert _detect_log_alias("check log errors") is None
 
 
-def test_detect_log_alias_korean_particle_suffix(tmp_path, monkeypatch):
-    """@alias의 — Korean particle attached to alias should still resolve."""
+def test_detect_log_alias_with_punctuation(tmp_path, monkeypatch):
+    """@alias. - Punctuation after alias should still resolve."""
     reg_file = tmp_path / ".monix" / "log_registry.json"
     monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_DIR", tmp_path / ".monix")
     monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_FILE", reg_file)
@@ -136,37 +136,37 @@ def test_detect_log_alias_korean_particle_suffix(tmp_path, monkeypatch):
     reg_file.write_text(json.dumps([{"alias": "application", "type": "app", "path": "/x.log", "container": None}]))
 
     from monix.cli import _detect_log_alias
-    assert _detect_log_alias("@application의 WARN로그만 보여줘") == "application"
+    assert _detect_log_alias("show @application.") == "application"
 
 
 # ── _extract_search_pattern ───────────────────────────────────────────────────
 
 def test_extract_pattern_quoted():
     from monix.cli import _extract_search_pattern
-    assert _extract_search_pattern('@api "timeout" 에러 찾아줘', "api") == "timeout"
+    assert _extract_search_pattern('find "timeout" errors in @api', "api") == "timeout"
 
 
 def test_extract_pattern_english_keyword():
     from monix.cli import _extract_search_pattern
-    result = _extract_search_pattern("@api timeout 에러 찾아줘", "api")
+    result = _extract_search_pattern("find timeout error in @api", "api")
     assert result == "timeout"
 
 
 def test_extract_pattern_numeric_keyword():
     from monix.cli import _extract_search_pattern
-    result = _extract_search_pattern("@nginx 500 에러 검색해줘", "nginx")
+    result = _extract_search_pattern("search @nginx for 500 errors", "nginx")
     assert result == "500"
 
 
 def test_extract_pattern_returns_none_for_pure_intent():
     from monix.cli import _extract_search_pattern
-    result = _extract_search_pattern("@api 로그를 검색해서 에러가 있는지 확인해줘", "api")
+    result = _extract_search_pattern("search @api logs to see if there are errors", "api")
     assert result is None
 
 
-def test_extract_pattern_mixed_ascii_korean():
+def test_extract_pattern_mixed_ascii_punctuation():
     from monix.cli import _extract_search_pattern
-    result = _extract_search_pattern("@application의 WARN로그만 보여줘", "application")
+    result = _extract_search_pattern("show last lines of @application:warn", "application")
     assert result == "warn"
 
 
@@ -184,12 +184,12 @@ def test_is_bare_alias_with_punctuation():
 
 def test_is_bare_alias_with_only_stopword():
     from monix.cli import _is_bare_alias_input
-    assert _is_bare_alias_input("@application 로그", "application") is True
+    assert _is_bare_alias_input("@application log", "application") is True
 
 
 def test_is_bare_alias_with_intent_word():
     from monix.cli import _is_bare_alias_input
-    assert _is_bare_alias_input("@application 에러 확인", "application") is False
+    assert _is_bare_alias_input("@application check errors", "application") is False
 
 
 def test_is_bare_alias_with_search_pattern():
@@ -197,58 +197,80 @@ def test_is_bare_alias_with_search_pattern():
     assert _is_bare_alias_input("@application timeout", "application") is False
 
 
+# ── _is_natural_question ─────────────────────────────────────────────────────
+
+def test_is_natural_question_with_question_mark():
+    from monix.cli import _is_natural_question
+    assert _is_natural_question("Are there any success logs in @application?") is True
+
+
+def test_is_natural_question_with_polite_request():
+    from monix.cli import _is_natural_question
+    assert _is_natural_question("please show me one @application log") is True
+
+
+def test_is_natural_question_imperative_command_is_not():
+    from monix.cli import _is_natural_question
+    assert _is_natural_question("check @api errors") is False
+
+
+def test_is_natural_question_tail_command_is_not():
+    from monix.cli import _is_natural_question
+    assert _is_natural_question("show last 50 lines of @api") is False
+
+
 # ── _detect_log_intent ───────────────────────────────────────────────────────
 
 def test_detect_intent_tail_for_last_lines():
     from monix.cli import _detect_log_intent
-    assert _detect_log_intent("@application 로그 마지막 줄 검색해서 출력해줘") == "tail"
+    assert _detect_log_intent("search and show last lines of @application log") == "tail"
 
 
 def test_detect_intent_tail_for_show():
     from monix.cli import _detect_log_intent
-    assert _detect_log_intent("@api 로그 보여줘") == "tail"
+    assert _detect_log_intent("show @api log") == "tail"
 
 
 def test_detect_intent_search_for_error():
     from monix.cli import _detect_log_intent
-    assert _detect_log_intent("@api 로그를 검색해서 에러가 있는지 확인해줘") == "search"
+    assert _detect_log_intent("search @api log for errors") == "search"
 
 
-def test_detect_intent_search_for_오류():
+def test_detect_intent_search_for_exception():
     from monix.cli import _detect_log_intent
-    assert _detect_log_intent("@nginx 오류 있는지 봐줘") == "search"
+    assert _detect_log_intent("see if there are exceptions in @nginx") == "search"
 
 
 def test_detect_intent_default_tail():
     from monix.cli import _detect_log_intent
-    assert _detect_log_intent("@api 로그") == "tail"
+    assert _detect_log_intent("@api log") == "tail"
 
 
 def test_detect_intent_warn_filter():
     from monix.cli import _detect_log_intent
-    assert _detect_log_intent("@application의 WARN로그만 보여줘") == "search"
+    assert _detect_log_intent("show only warn logs for @application") == "search"
 
 
 # ── _extract_lines_count ──────────────────────────────────────────────────────
 
-def test_extract_lines_마지막_N줄():
-    from monix.cli import _extract_lines_count
-    assert _extract_lines_count("마지막 100줄 보여줘") == 100
-
-
 def test_extract_lines_last_N_lines():
     from monix.cli import _extract_lines_count
-    assert _extract_lines_count("last 50 lines") == 50
+    assert _extract_lines_count("show last 100 lines") == 100
+
+
+def test_extract_lines_tail_N():
+    from monix.cli import _extract_lines_count
+    assert _extract_lines_count("tail 50 lines") == 50
 
 
 def test_extract_lines_default():
     from monix.cli import _extract_lines_count
-    assert _extract_lines_count("에러 확인해줘") == 80
+    assert _extract_lines_count("check errors") == 80
 
 
-def test_extract_lines_N줄_앞에_마지막_없이():
+def test_extract_lines_N_lines_without_last():
     from monix.cli import _extract_lines_count
-    assert _extract_lines_count("200줄 출력해줘") == 200
+    assert _extract_lines_count("output 200 lines") == 200
 
 
 # ── _log_search_natural (integration) ────────────────────────────────────────
@@ -259,12 +281,12 @@ def test_log_search_natural_alias_not_found(tmp_path, monkeypatch):
     monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_FILE", reg_file)
 
     from monix.cli import _log_search_natural
-    result = _log_search_natural("ghost", "@ghost 에러 확인해줘")
-    assert "등록되어 있지 않습니다" in result
+    result = _log_search_natural("ghost", "check errors in @ghost")
+    assert "not registered" in result
 
 
 def test_log_search_natural_tail_intent(tmp_path, monkeypatch):
-    """'마지막 줄 출력' → tail_log, not error search."""
+    """'show last lines' -> tail_log, not error search."""
     reg_file = tmp_path / ".monix" / "log_registry.json"
     monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_DIR", tmp_path / ".monix")
     monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_FILE", reg_file)
@@ -275,14 +297,14 @@ def test_log_search_natural_tail_intent(tmp_path, monkeypatch):
 
     with patch("monix.tools.logs.app.subprocess.check_output", return_value="INFO: all good"):
         from monix.cli import _log_search_natural
-        result = _log_search_natural("application", "@application 로그 마지막 줄 검색해서 출력해줘")
+        result = _log_search_natural("application", "search and show last lines of @application log")
     # Should render as a plain log view, not error-search result
-    assert "에러/경고" not in result
+    assert "Error/Warn" not in result
     assert "Log:" in result
 
 
 def test_log_search_natural_all_lines_keyword(tmp_path, monkeypatch):
-    """'전체 로그 중' should scan all lines (999999), not just default 500."""
+    """'all lines' should scan all lines (999999), not just default 500."""
     reg_file = tmp_path / ".monix" / "log_registry.json"
     monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_DIR", tmp_path / ".monix")
     monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_FILE", reg_file)
@@ -299,7 +321,7 @@ def test_log_search_natural_all_lines_keyword(tmp_path, monkeypatch):
 
     with patch("monix.tools.logs.app.subprocess.check_output", side_effect=fake_check_output):
         from monix.cli import _log_search_natural
-        _log_search_natural("application", "@application의 전체 로그 중 WARN 로그만 보여주세요.")
+        _log_search_natural("application", "show WARN logs from all lines of @application.")
 
     assert captured["lines_arg"] == 999999
 
@@ -316,6 +338,6 @@ def test_log_search_natural_error_filter(tmp_path, monkeypatch):
     fake_output = "INFO: ok\nERROR: crash\nDEBUG: fine"
     with patch("monix.tools.logs.app.subprocess.check_output", return_value=fake_output):
         from monix.cli import _log_search_natural
-        result = _log_search_natural("api", "@api 로그를 검색해서 에러가 있는지 확인해줘")
-    assert "Error/Warn" in result  # render.py uses English after i18n migration
+        result = _log_search_natural("api", "search @api log for errors")
+    assert "Error/Warn" in result
     assert "crash" in result

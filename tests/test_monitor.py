@@ -48,8 +48,9 @@ def test_local_answer_cpu():
         "load_average": (0.1, 0.2, 0.3),
         "top_processes": [{"pid": 1, "ppid": 0, "cpu": 1.0, "mem": 0.1, "command": "init"}],
     }
-    assert "CPU 사용률" in local_answer("cpu 상태", snapshot)
+    # local_answer uses English after i18n
+    assert "CPU Usage" in local_answer("check cpu status", snapshot)
 
 
 def test_infer_service_name():
-    assert infer_service_name(["nginx", "서비스", "확인"]) == "nginx"
+    assert infer_service_name(["nginx", "service", "status"]) == "nginx"

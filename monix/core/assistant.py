@@ -29,9 +29,9 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
         ) if log_entries else "[]"
         user_text = (
             f"{question}\n\n"
-            f"[현재 서버 스냅샷]\n{snapshot_text}\n"
-            f"기본 로그 파일: {settings.log_file}\n"
-            f"[등록된 로그 소스 (alias → path/container)]\n{registry_text}"
+            f"[Current Server Snapshot]\n{snapshot_text}\n"
+            f"Default log file: {settings.log_file}\n"
+            f"[Registered Log Sources (alias → path/container)]\n{registry_text}"
         )
         user_msg = {"role": "user", "parts": [{"text": user_text}]}
 
@@ -83,19 +83,19 @@ def _append_to_history(
 def local_answer(question: str, snapshot: dict | None = None) -> str:
     snapshot = snapshot or collect_snapshot()
     lowered = question.lower()
-    if any(word in lowered for word in ("cpu", "load", "부하")):
+    if any(word in lowered for word in ("cpu", "load", "load average")):
         return _cpu_answer(snapshot)
-    if any(word in lowered for word in ("memory", "mem", "ram", "메모리")):
+    if any(word in lowered for word in ("memory", "mem", "ram")):
         return _memory_answer(snapshot)
-    if any(word in lowered for word in ("disk", "storage", "디스크", "용량")):
+    if any(word in lowered for word in ("disk", "storage", "capacity")):
         return _disk_answer(snapshot)
-    if any(word in lowered for word in ("process", "top", "프로세스")):
+    if any(word in lowered for word in ("process", "top", "processes")):
         return _process_answer(snapshot)
     return _summary_answer(snapshot)
 
 
 def infer_service_name(tokens: list[str]) -> str | None:
-    ignored = {"서비스", "service", "status", "상태", "확인", "알려줘", "보여줘", "체크", "해줘"}
+    ignored = {"service", "status", "check", "show", "tell", "verify"}
     for token in tokens:
         cleaned = token.strip(".,:;()[]{}")
         if cleaned and cleaned.lower() not in ignored and not cleaned.startswith("/"):
@@ -116,7 +116,7 @@ def wrap(text: str) -> str:
 def _summary_answer(snapshot: dict) -> str:
     alerts = snapshot.get("alerts") or []
     lines = [
-        f"{snapshot['host']} 상태 요약",
+        f"Status summary for {snapshot['host']}",
         f"- OS: {snapshot['os']}",
         f"- Uptime: {snapshot['uptime']}",
         f"- CPU: {_format_percent(snapshot.get('cpu_percent'))}",
@@ -126,19 +126,19 @@ def _summary_answer(snapshot: dict) -> str:
     for disk in snapshot.get("disks", []):
         lines.append(f"- Disk {disk['path']}: {_format_percent(disk.get('percent'))} used, {human_bytes(disk.get('free'))} free")
     if alerts:
-        lines.append("주의:")
+        lines.append("Warnings:")
         lines.extend(f"- {alert}" for alert in alerts)
     else:
-        lines.append("현재 기본 임계치 기준의 즉시 경고는 없습니다.")
+        lines.append("No immediate alerts based on default thresholds.")
     return "\n".join(lines)
 
 
 def _cpu_answer(snapshot: dict) -> str:
     return "\n".join(
         [
-            f"CPU 사용률: {_format_percent(snapshot.get('cpu_percent'))}",
+            f"CPU Usage: {_format_percent(snapshot.get('cpu_percent'))}",
             f"Load avg: {_format_load(snapshot.get('load_average'))}",
-            "CPU 상위 프로세스:",
+            "Top CPU processes:",
             *_format_processes(snapshot.get("top_processes", []), limit=5),
         ]
     )
@@ -148,16 +148,16 @@ def _memory_answer(snapshot: dict) -> str:
     memory = snapshot.get("memory", {})
     return "\n".join(
         [
-            f"메모리 사용률: {_format_percent(memory.get('percent'))}",
-            f"사용 중: {human_bytes(memory.get('used'))}",
-            f"사용 가능: {human_bytes(memory.get('available'))}",
-            f"전체: {human_bytes(memory.get('total'))}",
+            f"Memory Usage: {_format_percent(memory.get('percent'))}",
+            f"Used: {human_bytes(memory.get('used'))}",
+            f"Available: {human_bytes(memory.get('available'))}",
+            f"Total: {human_bytes(memory.get('total'))}",
         ]
     )
 
 
 def _disk_answer(snapshot: dict) -> str:
-    lines = ["디스크 상태:"]
+    lines = ["Disk Status:"]
     for disk in snapshot.get("disks", []):
         lines.append(
             f"- {disk['path']}: {_format_percent(disk.get('percent'))} used, "
@@ -167,12 +167,12 @@ def _disk_answer(snapshot: dict) -> str:
 
 
 def _process_answer(snapshot: dict) -> str:
-    return "\n".join(["CPU 상위 프로세스:", *_format_processes(snapshot.get("top_processes", []), limit=10)])
+    return "\n".join(["Top CPU processes:", *_format_processes(snapshot.get("top_processes", []), limit=10)])
 
 
 def _format_processes(processes: list[dict], limit: int) -> list[str]:
     if not processes:
-        return ["- 프로세스 정보를 읽을 수 없습니다."]
+        return ["- Could not read process information."]
     return [
         f"- pid={proc['pid']} cpu={proc['cpu']:.1f}% mem={proc['mem']:.1f}% cmd={proc['command']}"
         for proc in processes[:limit]

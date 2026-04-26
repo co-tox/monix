@@ -100,9 +100,9 @@ class GeminiClient:
                 data = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
-            return f"Gemini API 오류 ({exc.code}): {body[:200]}", [], []
+            return f"Gemini API error ({exc.code}): {body[:200]}", [], []
         except (OSError, urllib.error.URLError) as exc:
-            return f"Gemini API 호출에 실패했습니다: {exc}", [], []
+            return f"Gemini API call failed: {exc}", [], []
 
         try:
             parts = data["candidates"][0]["content"]["parts"]

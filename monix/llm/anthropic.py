@@ -63,7 +63,7 @@ class AnthropicClient:
             with urllib.request.urlopen(request, timeout=20) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except (OSError, urllib.error.HTTPError, urllib.error.URLError) as exc:
-            return f"Claude API 호출에 실패했습니다: {exc}"
+            return f"Anthropic API call failed: {exc}"
         parts = []
         for block in data.get("content", []):
             if block.get("type") == "text":

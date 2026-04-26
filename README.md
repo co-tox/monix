@@ -31,7 +31,7 @@ uv run monix
 This opens the terminal UI with a live server summary and a prompt:
 
 ```text
-> CPU 상태 봐줘
+> How is the CPU?
 > /top 10
 > /logs /var/log/syslog 80
 ```
@@ -51,7 +51,7 @@ uv run monix status
 uv run monix top --limit 10
 uv run monix logs /var/log/syslog --lines 80
 uv run monix service nginx
-uv run monix ask "CPU와 메모리 상태를 보고 위험한 부분을 알려줘"
+uv run monix ask "Check CPU and memory and let me know if anything is risky"
 ```
 
 Inside the interactive shell:
@@ -62,7 +62,7 @@ Inside the interactive shell:
 /top 15
 /logs /var/log/syslog 100
 /service nginx
-/ask 지금 서버 상태 요약해줘
+/ask summarize current server status
 /help
 /exit
 ```
@@ -70,10 +70,10 @@ Inside the interactive shell:
 Natural language also works for common monitoring requests:
 
 ```text
-CPU 상태 보여줘
-메모리랑 디스크 확인해줘
-nginx 서비스 상태 알려줘
-최근 로그 봐줘 /var/log/syslog
+show cpu status
+check memory and disk
+how is the nginx service?
+show latest logs from /var/log/syslog
 ```
 
 ## Configuration

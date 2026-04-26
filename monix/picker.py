@@ -12,58 +12,58 @@ except ImportError:
 
 
 COMMANDS: list[tuple[str, str]] = [
-    ("/exit",           "종료"),
-    ("/help",           "도움말"),
-    ("/clear",          "대화 초기화"),
-    ("/ask",            "Gemini 질문  <내용>"),
-    ("/service",        "서비스 상태  <이름>"),
+    ("/exit",           "Exit"),
+    ("/help",           "Help"),
+    ("/clear",          "Clear history"),
+    ("/ask",            "Ask Gemini  <query>"),
+    ("/service",        "Service status  <name>"),
     ("/docker",         "Docker  ps·logs·search·live"),
-    ("/logs",           "로그 보기 (기존)  [경로] [줄수]"),
-    ("/log",            "로그 관리  add·list·@alias·--live"),
-    ("/top",            "프로세스 TOP  [개수]"),
-    ("/watch",          "실시간 모니터링  [초]"),
-    ("/io",             "디스크 I/O  읽기/쓰기 속도"),
-    ("/net",            "네트워크 I/O  인터페이스별 bps"),
-    ("/swap",           "스왑 사용량"),
-    ("/disk",           "디스크 사용량"),
-    ("/memory",         "메모리 사용량 상세"),
-    ("/cpu",            "CPU 사용률 + Load average"),
-    ("/stat",    "종합 단발 스냅샷  swap · net · io 포함"),
+    ("/logs",           "Direct log view  [path] [lines]"),
+    ("/log",            "Log management  add·list·@alias·--live"),
+    ("/top",            "Process TOP  [count]"),
+    ("/watch",          "Real-time watch  [sec]"),
+    ("/io",             "Disk I/O  read/write speed"),
+    ("/net",            "Network I/O  per-interface bps"),
+    ("/swap",           "Swap usage"),
+    ("/disk",           "Disk usage"),
+    ("/memory",         "Detailed memory usage"),
+    ("/cpu",            "CPU usage + Load average"),
+    ("/stat",           "Summary snapshot including swap·net·io"),
 ]
 
 # Subcommand options revealed when the user types "<command> " (trailing space)
 # in the picker — e.g. "log " expands to /log add, /log list, /log remove, ...
 SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
     "/log": [
-        ("add",          "@alias -app|-nginx|-docker <path>  로그 등록"),
-        ("list",         "등록된 로그 목록"),
-        ("remove",       "@alias  등록 해제"),
-        ("docker-list",  "실행 중인 Docker 컨테이너 목록"),
+        ("add",          "@alias -app|-nginx|-docker <path>  Register log"),
+        ("list",         "List registered logs"),
+        ("remove",       "@alias  Unregister log"),
+        ("docker-list",  "List running Docker containers"),
     ],
     "/docker": [
-        ("ps",      "실행 중인 컨테이너 목록"),
-        ("add",     "@alias <container>  컨테이너 등록"),
-        ("list",    "등록된 alias 목록"),
-        ("logs",    "<container|@alias> [-n lines]  로그 보기"),
-        ("search",  "<container|@alias> [pattern]  에러/패턴 검색"),
-        ("live",    "<container|@alias> [-n lines]  실시간 스트리밍"),
-        ("remove",  "@alias  등록 해제"),
+        ("ps",      "List running containers"),
+        ("add",     "@alias <container>  Register alias"),
+        ("list",    "List registered aliases"),
+        ("logs",    "<container|@alias> [-n lines]  View logs"),
+        ("search",  "<container|@alias> [pattern]  Search patterns"),
+        ("live",    "<container|@alias> [-n lines]  Real-time stream"),
+        ("remove",  "@alias  Unregister alias"),
     ],
     "/watch": [
-        ("cpu",     "CPU 사용률 모니터링  [초]"),
-        ("memory",  "메모리 모니터링  [초]"),
-        ("disk",    "디스크 모니터링  [초]"),
-        ("swap",    "스왑 모니터링  [초]"),
-        ("net",     "네트워크 모니터링  [초]"),
-        ("io",      "디스크 I/O 모니터링  [초]"),
+        ("cpu",     "Watch CPU usage  [sec]"),
+        ("memory",  "Watch memory  [sec]"),
+        ("disk",    "Watch disk  [sec]"),
+        ("swap",    "Watch swap  [sec]"),
+        ("net",     "Watch network  [sec]"),
+        ("io",      "Watch disk I/O  [sec]"),
     ],
     "/stat": [
-        ("cpu",     "CPU 단발 스냅샷"),
-        ("memory",  "메모리 단발 스냅샷"),
-        ("disk",    "디스크 단발 스냅샷"),
-        ("swap",    "스왑 단발 스냅샷"),
-        ("net",     "네트워크 단발 스냅샷"),
-        ("io",      "디스크 I/O 단발 스냅샷"),
+        ("cpu",     "CPU snapshot"),
+        ("memory",  "Memory snapshot"),
+        ("disk",    "Disk snapshot"),
+        ("swap",    "Swap snapshot"),
+        ("net",     "Network snapshot"),
+        ("io",      "Disk I/O snapshot"),
     ],
 }
 
@@ -81,15 +81,15 @@ _PICKER_BLOCK = max(len(COMMANDS), *(len(v) for v in SUBCOMMANDS.values()))
 
 
 def pick_with_filter(prompt_prefix: str = "") -> str | None:
-    """Claude Code / Codex 스타일 라이브 필터 피커.
+    """Claude Code / Codex style live filter picker.
 
-    필터 입력은 프롬프트 줄(P) 위에 인라인으로 표시되고,
-    항목 목록은 P+1 ~ P+N 에 in-place 렌더링된다.
+    Filter input is shown inline on prompt line (P),
+    and the list items are rendered in-place at P+1 ~ P+N.
 
-    레이아웃:
-        P       monix > /stat              ← 프롬프트 + 필터 (인라인)
-        P+1     ❯ /status   서버 상태       ← 선택된 항목 (cyan + bold)
-        P+2       /cpu      CPU 사용률      ← 나머지 항목 (dim)
+    Layout:
+        P       monix > /stat              ← Prompt + Filter (inline)
+        P+1     ❯ /status   Server Status   ← Selected (cyan + bold)
+        P+2       /cpu      CPU Usage       ← Other items (dim)
         ...
     """
     if not _HAS_TTY or not sys.stdout.isatty():
@@ -104,7 +104,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
     initialized = False
     pending = bytearray()
 
-    # ── 유틸 ─────────────────────────────────────────────────────────
+    # ── Utils ────────────────────────────────────────────────────────
     def _cw(c: str) -> int:
         return 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
 
@@ -112,7 +112,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         return sum(_cw(c) for c in chars)
 
     def _vis_width(s: str) -> int:
-        """ANSI 시퀀스를 제거한 터미널 표시 너비."""
+        """Visual width of string excluding ANSI escape sequences."""
         w = 0
         in_esc = False
         for c in s:
@@ -151,55 +151,55 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         return [(cmd, desc) for cmd, desc in COMMANDS if cmd.lower().startswith(prefix)]
 
     def _filter_inline() -> str:
-        """프롬프트 뒤에 붙는 /query 문자열 (ANSI 포함)."""
+        """The /query string shown after prompt (with ANSI)."""
         query = "".join(query_buf)
         if query:
             return f"\033[36m/\033[1m{query}\033[0m"
         return "\033[36m/\033[0m"
 
-    # ── 렌더링 ───────────────────────────────────────────────────────
+    # ── Rendering ────────────────────────────────────────────────────
     def _draw() -> None:
         nonlocal initialized
         items = _items()
         out = []
 
         if not initialized:
-            # P+1 ~ P+N 라인 미리 확보. 커서 → P+N col 0
+            # Pre-allocate P+1 ~ P+N lines. Cursor → P+N col 0
             out.append("\r\n" * BLOCK)
-            # BLOCK 줄 위로 → P col 0
+            # Move back up to P col 0
             out.append(f"\033[{BLOCK}A\r")
             initialized = True
         else:
-            # _draw() 완료 후 커서는 P q_cursor 열 → \r 로 col 0
+            # After _draw(), cursor is at P q_cursor -> back to col 0
             out.append("\r")
 
-        # P: 프롬프트 + 필터 인라인
+        # P: Prompt + inline filter
         out.append(f"\033[K{prompt_prefix}{_filter_inline()}")
 
-        # P+1 ~ P+N: 항목 슬롯 (항상 N 개, 내용 없으면 빈 줄)
+        # P+1 ~ P+N: Item slots (always N slots, empty lines if no content)
         for i in range(N):
             out.append("\033[1B\r")
             if not items:
-                content = "\033[2m  (일치하는 명령어 없음)\033[0m" if i == 0 else ""
+                content = "\033[2m  (No matching commands)\033[0m" if i == 0 else ""
             elif i < len(items):
                 cmd, desc = items[i]
                 if i == idx:
-                    # 선택된 항목: ❯ + cyan bold 명령 + dim 설명
+                    # Selected: ❯ + cyan bold command + dim desc
                     content = (
                         f"\033[36m❯ \033[1m{cmd:<12}\033[0m"
                         f"  \033[2m{desc}\033[0m"
                     )
                 else:
-                    # 비선택: 모두 dim
+                    # Non-selected: all dim
                     content = f"\033[2m  {cmd:<12}  {desc}\033[0m"
             else:
                 content = ""
             out.append(f"\033[K  {content}" if content else "\033[K")
 
-        # 커서를 P q_cursor 열로 복원
-        # 현재 위치 P+N → BLOCK 줄 위로 → P col 0
+        # Restore cursor to P q_cursor col
+        # Currently at P+N -> move back up to P col 0
         out.append(f"\033[{BLOCK}A\r")
-        # 프롬프트 가시 너비 + '/' 1열 + query[:q_cursor] 너비
+        # Prompt width + '/' char (1) + query prefix width
         q_col = _vis_width(prompt_prefix) + 1 + _q_width(query_buf[:q_cursor])
         out.append(f"\033[{q_col}C")
 
@@ -207,19 +207,19 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         sys.stdout.flush()
 
     def _clear() -> None:
-        """드롭다운 소거 후 커서를 P col 0 으로 복원.
+        """Clear dropdown and restore cursor to P col 0.
 
-        _draw() 완료 후 커서는 P q_cursor 열에 있다.
+        Cursor is at P q_cursor col after _draw().
         """
         out = []
-        out.append("\r\033[K")              # P 지우기 (커서 P col 0)
+        out.append("\r\033[K")              # Clear P (cursor at P col 0)
         for _ in range(BLOCK):
-            out.append("\033[1B\r\033[K")   # P+1 ~ P+N 지우기
-        out.append(f"\033[{BLOCK + 1}A\r")  # 다시 P col 0 으로
+            out.append("\033[1B\r\033[K")   # Clear P+1 ~ P+N
+        out.append(f"\033[{BLOCK + 1}A\r")  # Back to P col 0
         sys.stdout.write("".join(out))
         sys.stdout.flush()
 
-    # ── 이벤트 루프 ──────────────────────────────────────────────────
+    # ── Event Loop ───────────────────────────────────────────────────
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd)
 
@@ -230,43 +230,43 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         while True:
             b = sys.stdin.buffer.read(1)
 
-            # ── Escape 시퀀스 ────────────────────────────────────────
+            # ── Escape Sequences ──────────────────────────────────────
             if b == b"\x1b":
                 b2 = sys.stdin.buffer.read(1)
                 if b2 == b"[":
                     b3 = sys.stdin.buffer.read(1)
-                    if b3 == b"A":    # 위 → 목록 위로
+                    if b3 == b"A":    # Up -> Prev item
                         n = max(len(_items()), 1)
                         idx = (idx - 1) % n
-                    elif b3 == b"B":  # 아래 → 목록 아래로
+                    elif b3 == b"B":  # Down -> Next item
                         n = max(len(_items()), 1)
                         idx = (idx + 1) % n
-                    elif b3 == b"C":  # 오른쪽 → 필터 커서 오른쪽
+                    elif b3 == b"C":  # Right -> Move cursor
                         if q_cursor < len(query_buf):
                             q_cursor += 1
-                    elif b3 == b"D":  # 왼쪽 → 필터 커서 왼쪽
+                    elif b3 == b"D":  # Left -> Move cursor
                         if q_cursor > 0:
                             q_cursor -= 1
-                    elif b3 == b"H":
+                    elif b3 == b"H":  # Home
                         q_cursor = 0
-                    elif b3 == b"F":
+                    elif b3 == b"F":  # End
                         q_cursor = len(query_buf)
                     elif b3.isdigit():
                         seq = b3
                         while not (seq[-1:].isalpha() or seq.endswith(b"~")):
                             seq += sys.stdin.buffer.read(1)
-                        if seq == b"3~" and q_cursor < len(query_buf):
+                        if seq == b"3~" and q_cursor < len(query_buf):  # Delete
                             query_buf.pop(q_cursor)
                             idx = 0
-                        elif seq in (b"1~", b"7~"):
+                        elif seq in (b"1~", b"7~"):  # Home
                             q_cursor = 0
-                        elif seq in (b"4~", b"8~"):
+                        elif seq in (b"4~", b"8~"):  # End
                             q_cursor = len(query_buf)
                 else:
                     _clear()
                     return None
 
-            # ── Enter → 선택 ─────────────────────────────────────────
+            # ── Enter → Select ───────────────────────────────────────
             elif b in (b"\r", b"\n"):
                 items = _items()
                 if items:
@@ -278,7 +278,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
                 _clear()
                 return selected
 
-            # ── Ctrl-C / Ctrl-D → 취소 ───────────────────────────────
+            # ── Ctrl-C / Ctrl-D → Cancel ─────────────────────────────
             elif b in (b"\x03", b"\x04"):
                 _clear()
                 return None
@@ -299,7 +299,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
                     _clear()
                     return None
 
-            # ── 일반 문자 (멀티바이트 UTF-8 포함) ───────────────────
+            # ── Normal Characters (UTF-8) ────────────────────────────
             else:
                 pending.extend(b)
                 while pending:
@@ -325,7 +325,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
 
 
 def pick() -> str | None:
-    """방향키로 명령어를 선택한다. 취소 시 None."""
+    """Select command using arrow keys. Return None if cancelled."""
     if not _HAS_TTY or not sys.stdout.isatty():
         return None
 
