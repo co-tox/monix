@@ -97,6 +97,47 @@ def render_snapshot(snapshot: dict) -> str:
     return "\n".join(lines)
 
 
+def render_cpu(cpu_percent: float | None, load: tuple | None) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    return "\n".join([
+        _rule(width),
+        _text(style("CPU", "bold"), inner),
+        _rule(width),
+        _metric("CPU", cpu_percent, inner),
+        _line("Load avg", _load(load), inner),
+        _rule(width),
+    ])
+
+
+def render_memory(memory: dict) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    return "\n".join([
+        _rule(width),
+        _text(style("Memory", "bold"), inner),
+        _rule(width),
+        _metric("Memory", memory.get("percent"), inner, suffix=f"{human_bytes(memory.get('available'))} free"),
+        _line("Used", human_bytes(memory.get("used")), inner),
+        _line("Available", human_bytes(memory.get("available")), inner),
+        _line("Total", human_bytes(memory.get("total")), inner),
+        _rule(width),
+    ])
+
+
+def render_disk(disks: list[dict]) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    lines = [_rule(width), _text(style("Disk", "bold"), inner), _rule(width)]
+    for disk in disks:
+        suffix = f"{human_bytes(disk.get('free'))} free / {human_bytes(disk.get('total'))}"
+        lines.append(_metric(disk["path"], disk.get("percent"), inner, suffix=suffix))
+    if not disks:
+        lines.append(_text("no disk data", inner))
+    lines.append(_rule(width))
+    return "\n".join(lines)
+
+
 def render_processes(processes: list[dict]) -> str:
     return "\n".join([style("PID      CPU%   MEM%   COMMAND", "bold"), *_process_lines(processes)])
 

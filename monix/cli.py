@@ -13,7 +13,6 @@ from monix.tools.logs import follow_log, registry, tail_log
 from monix.tools.logs.docker import follow_container, tail_container
 from monix.tools.processes import top_processes
 from monix.tools.services import service_status
-from monix.tools.system import collect_snapshot, top_processes
 from monix.render import (
     clear_screen,
     colorize_log_line,
@@ -23,32 +22,36 @@ from monix.render import (
     render_logs,
     render_reply,
     render_processes,
-    render_service,
     render_snapshot,
     render_welcome,
 )
+    render_service,
+from monix.tools.system import collect_snapshot, cpu_usage_percent, disk_info, load_average, memory_info, top_processes
 
 
 HELP = """Commands:
   /status                          서버 상태 (CPU, 메모리, 디스크, 알림)
   /watch [seconds]                 실시간 모니터링 (Ctrl-C로 종료)
-  /top [limit]                     CPU 상위 프로세스
   /log add @alias -app <path>      앱 로그 등록
-  /log add @alias -nginx <path>    Nginx 로그 등록
   /log add @alias -docker <name>   Docker 컨테이너 로그 등록
-  /log list                        등록된 로그 목록
   /log @                           등록된 alias 보기
   /log @alias [-n lines]           등록된 로그 보기
   /log @alias --live [-n lines]    등록된 로그 실시간 스트리밍
-  /log /path/to/file [-n lines]    경로 직접 지정 (등록 불필요)
   /log /path/to/file --live        경로 직접 실시간 스트리밍
-  /log remove @alias               로그 등록 해제
   /logs [path] [lines]             로그 직접 보기 (기존)
   /service <name>                  systemd 서비스 상태
-  /ask <question>                  Gemini에게 질문 (GEMINI_API_KEY 필요)
   /clear                           대화 기록 초기화
   /help                            도움말
   /exit                            종료
+  /ask <question>                  Gemini에게 질문 (GEMINI_API_KEY 필요)
+  /log remove @alias               로그 등록 해제
+  /log /path/to/file [-n lines]    경로 직접 지정 (등록 불필요)
+  /log list                        등록된 로그 목록
+  /log add @alias -nginx <path>    Nginx 로그 등록
+  /top [limit]                     CPU 상위 프로세스
+  /memory                 메모리 사용량 상세
+  /disk                   디스크 사용량
+  /cpu                    CPU 사용률 + Load average
 
 자연어로도 바로 물어볼 수 있어요:
   "CPU 왜 이렇게 높아?"  "nginx 서비스 확인해줘"  "메모리 언제 부족해질까?\""""
@@ -63,6 +66,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "status":
         print(render_snapshot(collect_snapshot(settings)))
+        return 0
+    if args.command == "cpu":
+        print(render_cpu(cpu_usage_percent(), load_average()))
+        return 0
+    if args.command == "memory":
+        print(render_memory(memory_info()))
+        return 0
+    if args.command == "disk":
+        print(render_disk(disk_info()))
         return 0
     if args.command == "top":
         print(render_processes(top_processes(args.limit)))
@@ -85,6 +97,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("status", help="show server status")
+    subparsers.add_parser("cpu", help="show CPU usage and load average")
+    subparsers.add_parser("memory", help="show memory usage")
+    subparsers.add_parser("disk", help="show disk usage")
 
     top_parser = subparsers.add_parser("top", help="show top CPU processes")
     top_parser.add_argument("--limit", "-n", type=int, default=10)
@@ -153,6 +168,12 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         return "대화 기록을 초기화했습니다. 새로운 대화를 시작해요!"
     if command == "/status":
         return render_snapshot(collect_snapshot(settings))
+    if command == "/cpu":
+        return render_cpu(cpu_usage_percent(), load_average())
+    if command == "/memory":
+        return render_memory(memory_info())
+    if command == "/disk":
+        return render_disk(disk_info())
     if command == "/watch":
         interval = _int_arg(args, 0, 5)
         return watch(interval, settings)
