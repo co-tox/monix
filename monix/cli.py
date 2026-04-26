@@ -160,8 +160,8 @@ def _read_line(prompt_str: str) -> str:
                 _T.tcsetattr(fd, _T.TCSADRAIN, saved)
                 result = pick_with_filter()
                 if result:
-                    # 원래 프롬프트 줄에 선택된 명령어 표시
-                    sys.stdout.write(f"\033[A\r\033[K{prompt_line}{result}\n")
+                    # 피커가 _clear() 후 커서를 프롬프트 줄 맨 앞에 둠
+                    sys.stdout.write(f"\r\033[K{prompt_line}{result}\n")
                     sys.stdout.flush()
                     if result in NO_ARG_COMMANDS:
                         return result
@@ -177,7 +177,7 @@ def _read_line(prompt_str: str) -> str:
                     except ImportError:
                         return result
                 # 취소 — 프롬프트 줄 복원
-                sys.stdout.write(f"\033[A\r\033[K{prompt_line}")
+                sys.stdout.write(f"\r\033[K{prompt_line}")
                 sys.stdout.flush()
                 _tty.setraw(fd)
                 buf.clear()

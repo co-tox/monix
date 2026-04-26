@@ -30,13 +30,13 @@ NO_ARG_COMMANDS = {"/status", "/cpu", "/memory", "/disk", "/clear", "/help", "/e
 
 
 def pick_with_filter() -> str | None:
-    """'/' 입력 즉시 열리는 라이브 필터 피커. 타이핑으로 좁히고 방향키로 탐색."""
+    """프롬프트 아래에 드롭다운으로 펼쳐지는 라이브 필터 피커.
+    커서는 프롬프트 줄에 고정, 목록은 아래에 표시됨 (Codex 스타일)."""
     if not _HAS_TTY or not sys.stdout.isatty():
         return None
 
     query = ""
     idx = 0
-    prev_n = 0
 
     def _items() -> list[tuple[str, str]]:
         if not query:
@@ -44,32 +44,41 @@ def pick_with_filter() -> str | None:
         prefix = ("/" + query).lower()
         return [(cmd, desc) for cmd, desc in COMMANDS if cmd.lower().startswith(prefix)]
 
-    def _draw(first: bool = False) -> None:
-        nonlocal prev_n
-        items = _items()
-        cur_n = max(len(items), 1) + 1
-        buf = []
-        if not first:
-            buf.append(f"\033[{prev_n}A\r\033[J")
-        prev_n = cur_n
+    def _label() -> str:
         if query:
-            label = f"\033[36m/\033[1m{query}\033[0m"
-        else:
-            label = "\033[2m/  입력하여 필터  ↑↓ 탐색  Enter 실행  Esc 취소\033[0m"
-        buf.append(f"  {label}\033[K\n")
+            return f"\033[36m/\033[1m{query}\033[0m"
+        return "\033[36m/\033[0m"
+
+    def _draw() -> None:
+        """프롬프트 줄에 /query 표시, 아래에 목록 렌더링 후 커서를 /query 끝으로 복원."""
+        items = _items()
+        buf = []
+        # 저장된 위치(> 이후)로 복원 → /query 재작성 → 줄 끝 지우기
+        buf.append(f"\033[u\033[K{_label()}")
+        # 한 줄 아래로 이동 후 스크린 하단 전체 지우기
+        buf.append("\033[1B\r\033[J")
+        # 빈 줄(구분선) + 목록 항목
+        buf.append("\n")
         if not items:
-            buf.append(f"  \033[2m일치하는 명령어 없음\033[0m\033[K\n")
+            buf.append("\r  \033[2m(일치하는 명령어 없음)\033[0m\033[K\n")
         else:
             for i, (cmd, desc) in enumerate(items):
                 if i == idx:
-                    buf.append(f"  \033[36m❯ {cmd:<12}\033[0m  \033[2m{desc}\033[0m\033[K\n")
+                    buf.append(f"\r  \033[36m❯ {cmd:<12}\033[0m  \033[2m{desc}\033[0m\033[K\n")
                 else:
-                    buf.append(f"    {cmd:<12}  \033[2m{desc}\033[0m\033[K\n")
+                    buf.append(f"\r    {cmd:<12}  \033[2m{desc}\033[0m\033[K\n")
+        # 저장 위치로 돌아와 /query 다시 써서 커서를 query 끝에 놓기
+        buf.append(f"\033[u{_label()}")
         sys.stdout.write("".join(buf))
         sys.stdout.flush()
 
     def _clear() -> None:
-        sys.stdout.write(f"\033[{prev_n}A\r\033[J")
+        """드롭다운 지우고 커서를 프롬프트 줄 맨 앞으로."""
+        buf = []
+        buf.append("\033[u\033[K")       # 저장 위치 복원 → / 포함 줄 끝까지 지우기
+        buf.append("\033[1B\r\033[J")    # 한 줄 아래, 스크린 하단 전체 지우기
+        buf.append("\033[1A\r")          # 프롬프트 줄 맨 앞으로 복귀
+        sys.stdout.write("".join(buf))
         sys.stdout.flush()
 
     fd = sys.stdin.fileno()
@@ -77,8 +86,9 @@ def pick_with_filter() -> str | None:
 
     try:
         tty.setraw(fd)
-        sys.stdout.write("\n")
-        _draw(first=True)
+        sys.stdout.write("\033[s")  # 현재 커서 위치 저장 (프롬프트 > 이후)
+        sys.stdout.flush()
+        _draw()
 
         while True:
             b = sys.stdin.buffer.read(1)
