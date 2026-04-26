@@ -144,7 +144,7 @@ def render_log_search(result: dict) -> str:
     total = result.get("total_scanned", 0)
     matches: list[dict] = result.get("matches", [])
 
-    query_label = f'Pattern "{query}"' if query else "Error/Warn"
+    query_label = f'Pattern "{query}"' if query else "에러/경고"
     error_count = sum(1 for m in matches if m["severity"] == "error")
     warn_count = sum(1 for m in matches if m["severity"] == "warn")
     found_color = "red" if error_count else "yellow" if warn_count else "green"

@@ -6,6 +6,8 @@ from typing import Iterator
 
 def tail_container(container: str, lines: int = 80) -> dict:
     """Fetch the last N lines from a Docker container's log."""
+    if lines < 1:
+        raise ValueError(f"lines must be >= 1, got {lines}")
     try:
         output = subprocess.check_output(
             ["docker", "logs", "--tail", str(lines), container],
@@ -17,7 +19,7 @@ def tail_container(container: str, lines: int = 80) -> dict:
     except FileNotFoundError:
         return {"path": f"docker://{container}", "status": "error", "lines": ["docker command not found"]}
     except subprocess.TimeoutExpired:
-        return {"path": f"docker://{container}", "status": "error", "lines": ["timeout"]}
+        return {"path": f"docker://{container}", "status": "error", "lines": ["타임아웃"]}
     except subprocess.CalledProcessError as exc:
         lines_out = (exc.output or "").splitlines()
         return {"path": f"docker://{container}", "status": "error", "lines": lines_out or [str(exc)]}

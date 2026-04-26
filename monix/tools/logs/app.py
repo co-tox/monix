@@ -13,6 +13,8 @@ _WARN_RE = re.compile(r"\b(WARN|WARNING)\b", re.IGNORECASE)
 
 
 def tail_log(path: str | Path, lines: int = 80) -> dict:
+    if lines < 1:
+        raise ValueError(f"lines must be >= 1, got {lines}")
     log_path = Path(path).expanduser()
     if not log_path.exists():
         return {"path": str(log_path), "status": "missing", "lines": []}

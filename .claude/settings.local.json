@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(git *)",
-      "Bash(uv run *)"
+      "Bash(uv run *)",
+      "Bash(python3 -m py_compile /Users/kimseongjin/Desktop/Projects/monix-co/monix/tools/logs/*.py)"
     ]
   }
 }
