@@ -12,21 +12,14 @@ except ImportError:
 
 
 COMMANDS: list[tuple[str, str]] = [
-    ("/cpu",            "CPU usage + Load average"),
-    ("/memory",         "Detailed memory usage"),
-    ("/disk",           "Disk usage"),
-    ("/swap",           "Swap usage"),
-    ("/net",            "Network I/O  per-interface bps"),
-    ("/io",             "Disk I/O  read/write speed"),
+    ("/stat",           "Snapshot / history  [all|cpu|memory|…] [period]"),
+    ("/watch",          "Real-time watch  [all|cpu|memory|…] [sec]"),
+    ("/collect",        "Collector  list·set·remove"),
     ("/top",            "Process TOP  [count]"),
     ("/service",        "Service status  <name>"),
-    ("/stat",           "Snapshot or history  [metric] [period]"),
-    ("/watch",          "Real-time watch  [metric] [sec]"),
-    ("/collect",        "Collector  list·set·remove"),
+    ("/docker",         "Docker  ps·stats·top·inspect·logs"),
     ("/log",            "Log management  add·list·@alias·--live"),
     ("/logs",           "Direct log view  [path] [lines]"),
-    ("/docker",         "Docker  ps·logs·search·live"),
-    ("/ask",            "Ask Gemini  <query>"),
     ("/clear",          "Clear history"),
     ("/help",           "Help"),
     ("/exit",           "Exit"),
@@ -41,13 +34,16 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("remove",       "@alias  Unregister log"),
     ],
     "/docker": [
-        ("ps",      "List running containers"),
-        ("add",     "@alias <container>  Register alias"),
-        ("list",    "List registered aliases"),
-        ("logs",    "<container|@alias> [-n lines]  View logs"),
-        ("search",  "<container|@alias> [pattern]  Search patterns"),
-        ("live",    "<container|@alias> [-n lines]  Real-time stream"),
-        ("remove",  "@alias  Unregister alias"),
+        ("ps",       "List running containers"),
+        ("stats",    "[container]  CPU/mem/net/io usage"),
+        ("top",      "<container|@alias>  Processes inside container"),
+        ("inspect",  "<container|@alias>  Ports, mounts, env, health"),
+        ("add",      "@alias <container>  Register alias"),
+        ("list",     "List registered aliases"),
+        ("logs",     "<container|@alias> [-n lines]  View logs"),
+        ("search",   "<container|@alias> [pattern]  Search patterns"),
+        ("live",     "<container|@alias> [-n lines]  Real-time stream"),
+        ("remove",   "@alias  Unregister alias"),
     ],
     "/watch": [
         ("cpu",     "Watch CPU usage  [sec]"),
@@ -68,11 +64,11 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
 }
 
 NO_ARG_COMMANDS = {
-    "/status", "/stat", "/cpu", "/memory", "/disk", "/swap", "/net", "/io",
+    "/stat", "/watch", "/collect",
     "/clear", "/help", "/exit",
     # subcommands that take no further args — Enter immediately submits.
     "/log list",
-    "/docker ps", "/docker list",
+    "/docker ps", "/docker list", "/docker stats",
 }
 
 # Fixed height = max(top-level, longest subcommand list) so subcommand views

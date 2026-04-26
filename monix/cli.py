@@ -119,7 +119,6 @@ HELP = """Commands:
   /docker search <container> [pattern] [-n lines]  Search error/pattern (direct)
   /docker live <container>         Real-time streaming (direct) [-n lines]
 
-  /ask <question>                  Ask Gemini (requires GEMINI_API_KEY)
   /clear                           Clear conversation history
   /help                            Show this help
   /exit                            Exit
@@ -514,18 +513,6 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
     if command == "/stat":
         metric, period = _stat_args(args)
         return stat(settings, metric, period)
-    if command == "/cpu":
-        return render_cpu(cpu_usage_percent(), load_average())
-    if command == "/memory":
-        return render_memory(memory_info())
-    if command == "/disk":
-        return render_disk(disk_info())
-    if command == "/swap":
-        return render_swap(swap_info())
-    if command == "/net":
-        return render_network(network_io())
-    if command == "/io":
-        return render_disk_io(disk_io())
     if command == "/watch":
         interval, metric = _watch_args(args)
         return watch(interval, settings, metric or None)
@@ -559,11 +546,6 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             return "Usage: /service <name>"
         svc = _run_with_indicator("service_status", service_status, args[0])
         return render_service(svc)
-    if command == "/ask":
-        if not args:
-            return "Usage: /ask <question>"
-        with Spinner("Asking Gemini..."):
-            return answer(" ".join(args), settings, history)
     if command == "/collect":
         return _dispatch_collect(args)
     return f"Unknown command: {command}\nType /help to see available commands."
