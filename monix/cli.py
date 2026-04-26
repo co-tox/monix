@@ -17,7 +17,8 @@ from monix.tools.collect import (
     collect_and_save,
     load_config as load_collector_config,
     load_history,
-    purge_old_files,
+    metrics_path,
+    prune_metrics_file,
     save_config as save_collector_config,
 )
 from monix.picker import NO_ARG_COMMANDS, pick, pick_with_filter
@@ -125,7 +126,7 @@ def _start_collector(cfg: CollectorConfig) -> None:
             try:
                 collect_and_save(cfg.folder)
                 if cfg.retention_days > 0:
-                    purge_old_files(cfg.folder, cfg.retention_days)
+                    prune_metrics_file(cfg.folder, cfg.retention_days)
             except Exception:
                 pass
             if stop.wait(interval_sec):
