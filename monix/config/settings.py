@@ -53,7 +53,7 @@ class Settings:
         from monix.config.keystore import load_api_key
         return cls(
             gemini_api_key=os.getenv("GEMINI_API_KEY") or load_api_key(),
-            model=os.getenv("MONIX_MODEL", "gemini-1.5-flash"),
+            model=os.getenv("MONIX_MODEL", "gemini-2.5-flash"),
             log_file=default_log_file(),
             thresholds=Thresholds.from_env(),
             platform=_resolve_platform(os.getenv("MONIX_PLATFORM", _platform.system())),

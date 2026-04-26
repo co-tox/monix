@@ -6,6 +6,7 @@ import textwrap
 from monix.config import Settings
 from monix.llm.gemini import GeminiClient
 from monix.tools.calling import TOOL_DECLARATIONS, call_tool
+from monix.tools.logs import registry
 from monix.tools.system import collect_snapshot, human_bytes
 
 _MAX_HISTORY = 20   # keep last 20 messages (~10 turns)
@@ -21,10 +22,16 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
 
     if client.enabled:
         snapshot_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
+        log_entries = registry.load()
+        registry_text = json.dumps(
+            [{"alias": e.alias, "type": e.type, "path": e.path, "container": e.container} for e in log_entries],
+            ensure_ascii=False,
+        ) if log_entries else "[]"
         user_text = (
             f"{question}\n\n"
             f"[현재 서버 스냅샷]\n{snapshot_text}\n"
-            f"기본 로그 파일: {settings.log_file}"
+            f"기본 로그 파일: {settings.log_file}\n"
+            f"[등록된 로그 소스 (alias → path/container)]\n{registry_text}"
         )
         user_msg = {"role": "user", "parts": [{"text": user_text}]}
 
@@ -32,21 +39,17 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
         working: list[dict] = list((history or [])[-_MAX_HISTORY:]) + [user_msg]
 
         for _ in range(_MAX_TOOL_ROUNDS):
-            text, tool_calls = client.chat_with_tools(working, TOOL_DECLARATIONS)
+            text, tool_calls, raw_parts = client.chat_with_tools(working, TOOL_DECLARATIONS)
 
             if not tool_calls:
                 # Final answer from the LLM
                 _append_to_history(history, user_msg, text)
                 return wrap(text or local_answer(question, snapshot))
 
-            # Append the model's tool-call turn to the working history
-            working.append({
-                "role": "model",
-                "parts": [
-                    {"functionCall": {"name": tc.name, "args": tc.args}}
-                    for tc in tool_calls
-                ],
-            })
+            # Append the model's turn verbatim — raw_parts preserves thought_signature
+            # and any other model-internal fields required by thinking-mode models.
+            working.append({"role": "model", "parts": raw_parts})
+
             # Execute every requested tool and feed results back
             responses = []
             for tc in tool_calls:
@@ -57,7 +60,7 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
             working.append({"role": "user", "parts": responses})
 
         # _MAX_TOOL_ROUNDS exhausted — ask the LLM to summarise what it found
-        text, _ = client.chat_with_tools(working, [])
+        text, _, _ = client.chat_with_tools(working, [])
         _append_to_history(history, user_msg, text)
         return wrap(text or local_answer(question, snapshot))
 

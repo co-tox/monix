@@ -170,6 +170,33 @@ def test_extract_pattern_mixed_ascii_korean():
     assert result == "warn"
 
 
+# ── _is_bare_alias_input ─────────────────────────────────────────────────────
+
+def test_is_bare_alias_just_alias():
+    from monix.cli import _is_bare_alias_input
+    assert _is_bare_alias_input("@application", "application") is True
+
+
+def test_is_bare_alias_with_punctuation():
+    from monix.cli import _is_bare_alias_input
+    assert _is_bare_alias_input("@application.", "application") is True
+
+
+def test_is_bare_alias_with_only_stopword():
+    from monix.cli import _is_bare_alias_input
+    assert _is_bare_alias_input("@application 로그", "application") is True
+
+
+def test_is_bare_alias_with_intent_word():
+    from monix.cli import _is_bare_alias_input
+    assert _is_bare_alias_input("@application 에러 확인", "application") is False
+
+
+def test_is_bare_alias_with_search_pattern():
+    from monix.cli import _is_bare_alias_input
+    assert _is_bare_alias_input("@application timeout", "application") is False
+
+
 # ── _detect_log_intent ───────────────────────────────────────────────────────
 
 def test_detect_intent_tail_for_last_lines():

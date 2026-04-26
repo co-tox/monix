@@ -571,6 +571,16 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
     # @alias 자연어 로그 검색 감지 — "@api 에러 확인해줘" 같은 형태 처리
     alias = _detect_log_alias(raw)
     if alias:
+        if _is_bare_alias_input(raw, alias):
+            # Bare "@alias" — too ambiguous to auto-tail. Defer to LLM (which
+            # has the registry in context) or fall back to a hint.
+            if settings.gemini_enabled:
+                with Spinner("Gemini에 질문 중..."):
+                    return answer(raw, settings, history)
+            return (
+                f"@{alias} 에 대해 무엇을 도와드릴까요?\n"
+                f"  예: @{alias} 에러 확인 / @{alias} 마지막 50줄 보여줘"
+            )
         return _log_search_natural(alias, raw)
 
     # Gemini 활성화 시 모든 자연어를 AI로 라우팅 (Claude처럼)
@@ -1030,6 +1040,23 @@ def _detect_log_alias(text: str) -> str | None:
         return None
     alias = match.group(1)
     return alias if registry.get(alias) is not None else None
+
+
+def _is_bare_alias_input(text: str, alias: str) -> bool:
+    """True if text is essentially just @alias with no actionable verb.
+
+    "Bare" means: after stripping the alias token and pure stopwords
+    (로그/log/는/을/…), nothing remains. Used to gate direct log-tool routing
+    so that "@application" alone defers to the LLM instead of unconditionally
+    tailing the log.
+    """
+    skip = _LOG_SEARCH_STOPWORDS | {alias.lower(), f"@{alias.lower()}"}
+    for token in text.split():
+        clean = token.strip("@.,?!:;。").lower()
+        if not clean or clean in skip:
+            continue
+        return False
+    return True
 
 
 def _extract_search_pattern(text: str, alias: str) -> str | None:
