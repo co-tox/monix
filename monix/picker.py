@@ -28,15 +28,22 @@ COMMANDS: list[tuple[str, str]] = [
 
 NO_ARG_COMMANDS = {"/status", "/cpu", "/memory", "/disk", "/clear", "/help", "/exit"}
 
+# Fixed height: filter line + blank separator + one slot per command.
+# Pre-allocating this many lines prevents terminal scroll during redraws.
+_PICKER_BLOCK = 2 + len(COMMANDS)
+
 
 def pick_with_filter() -> str | None:
-    """프롬프트 아래에 드롭다운으로 펼쳐지는 라이브 필터 피커.
-    커서는 프롬프트 줄에 고정, 목록은 아래에 표시됨 (Codex 스타일)."""
+    """라이브 필터 피커 — 고정 높이 블록을 미리 확보해 in-place 업데이트."""
     if not _HAS_TTY or not sys.stdout.isatty():
         return None
 
+    N = len(COMMANDS)
+    BLOCK = _PICKER_BLOCK  # filter(1) + blank(1) + items(N)
+
     query = ""
     idx = 0
+    initialized = False
 
     def _items() -> list[tuple[str, str]]:
         if not query:
@@ -50,34 +57,61 @@ def pick_with_filter() -> str | None:
         return "\033[36m/\033[0m"
 
     def _draw() -> None:
-        """프롬프트 줄에 /query 표시, 아래에 목록 렌더링 후 커서를 /query 끝으로 복원."""
+        nonlocal initialized
         items = _items()
         buf = []
-        # 저장된 위치(> 이후)로 복원 → /query 재작성 → 줄 끝 지우기
-        buf.append(f"\033[u\033[K{_label()}")
-        # 한 줄 아래로 이동 후 스크린 하단 전체 지우기
-        buf.append("\033[1B\r\033[J")
-        # 빈 줄(구분선) + 목록 항목
-        buf.append("\n")
-        if not items:
-            buf.append("\r  \033[2m(일치하는 명령어 없음)\033[0m\033[K\n")
+
+        if not initialized:
+            # Reserve BLOCK lines below the current prompt line P so that
+            # subsequent redraws never trigger terminal scrolling.
+            # "\r\n" × BLOCK lands cursor at col 0 of line P+BLOCK.
+            buf.append("\r\n" * BLOCK)
+            # Step back BLOCK-1 lines → P+1 (first line of the picker block).
+            buf.append(f"\033[{BLOCK - 1}A\r")
+            initialized = True
         else:
-            for i, (cmd, desc) in enumerate(items):
+            # After the previous _draw(), cursor is at end of the last item
+            # on line P+BLOCK. Go up BLOCK-1 to return to P+1.
+            buf.append(f"\033[{BLOCK - 1}A\r")
+
+        # P+1: filter bar
+        buf.append(f"\r\033[K{_label()}\n")
+        # P+2: blank separator
+        buf.append(f"\r\033[K\n")
+        # P+3 … P+N+2: always N fixed slots (blank-pad when filtered)
+        for i in range(N):
+            if not items:
+                line = (
+                    f"\r\033[K  \033[2m(일치하는 명령어 없음)\033[0m"
+                    if i == 0 else "\r\033[K"
+                )
+            elif i < len(items):
+                cmd, desc = items[i]
                 if i == idx:
-                    buf.append(f"\r  \033[36m❯ {cmd:<12}\033[0m  \033[2m{desc}\033[0m\033[K\n")
+                    line = f"\r\033[K  \033[36m❯ {cmd:<12}\033[0m  \033[2m{desc}\033[0m"
                 else:
-                    buf.append(f"\r    {cmd:<12}  \033[2m{desc}\033[0m\033[K\n")
-        # 저장 위치로 돌아와 /query 다시 써서 커서를 query 끝에 놓기
-        buf.append(f"\033[u{_label()}")
+                    line = f"\r\033[K    {cmd:<12}  \033[2m{desc}\033[0m"
+            else:
+                line = "\r\033[K"
+
+            # No trailing \n on the last item — keeps cursor on P+BLOCK, not P+BLOCK+1
+            buf.append(line + ("\n" if i < N - 1 else ""))
+
         sys.stdout.write("".join(buf))
         sys.stdout.flush()
 
     def _clear() -> None:
-        """드롭다운 지우고 커서를 프롬프트 줄 맨 앞으로."""
+        """드롭다운을 지우고 커서를 프롬프트 줄(P) col 0 으로 복원."""
         buf = []
-        buf.append("\033[u\033[K")       # 저장 위치 복원 → / 포함 줄 끝까지 지우기
-        buf.append("\033[1B\r\033[J")    # 한 줄 아래, 스크린 하단 전체 지우기
-        buf.append("\033[1A\r")          # 프롬프트 줄 맨 앞으로 복귀
+        # From P+BLOCK, go up to P+1 (filter line)
+        buf.append(f"\033[{BLOCK - 1}A\r")
+        # Erase lines P+1 … P+BLOCK-1 (each \n advances one line)
+        for _ in range(BLOCK - 1):
+            buf.append("\r\033[K\n")
+        # Erase P+BLOCK without advancing (no \n)
+        buf.append("\r\033[K")
+        # Return to prompt line P
+        buf.append(f"\033[{BLOCK}A\r")
         sys.stdout.write("".join(buf))
         sys.stdout.flush()
 
@@ -86,8 +120,6 @@ def pick_with_filter() -> str | None:
 
     try:
         tty.setraw(fd)
-        sys.stdout.write("\033[s")  # 현재 커서 위치 저장 (프롬프트 > 이후)
-        sys.stdout.flush()
         _draw()
 
         while True:
@@ -108,8 +140,9 @@ def pick_with_filter() -> str | None:
                     return None
             elif b in (b"\r", b"\n"):
                 items = _items()
+                selected = items[idx][0] if items else None
                 _clear()
-                return items[idx][0] if items else None
+                return selected
             elif b in (b"\x03", b"\x04"):
                 _clear()
                 return None
