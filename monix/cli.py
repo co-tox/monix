@@ -57,53 +57,53 @@ from monix.tools.system import (
 
 
 HELP = """Commands:
-  /stat [cpu|memory|disk|swap|net|io]  단발 스냅샷 (인자 없으면 전체)
-  /watch [cpu|memory|disk|swap|net|io] [seconds]  실시간 모니터링 (기본 5s, Ctrl-C로 종료)
-  /log add @alias -app <path>      앱 로그 등록
-  /log add @alias -nginx <path>    Nginx 로그 등록
-  /log add @alias -docker <name>   Docker 컨테이너 로그 등록
-  /log list                        등록된 로그 목록
-  /log @alias [-n lines]           등록된 로그 보기
-  /log @alias --search [pattern]   에러/경고 검색 (pattern 생략 시 에러 필터)
-  /log @alias --live [-n lines]    등록된 로그 실시간 스트리밍
-  /log /path/to/file [-n lines]    경로 직접 지정 (등록 불필요)
-  /log /path/to/file --live        경로 직접 실시간 스트리밍
-  /log remove @alias               로그 등록 해제
+  /stat [cpu|memory|disk|swap|net|io]  Snapshot (all if no metric provided)
+  /watch [cpu|memory|disk|swap|net|io] [seconds]  Real-time monitoring (default 5s, Ctrl-C to stop)
+  /log add @alias -app <path>      Register app log
+  /log add @alias -nginx <path>    Register Nginx log
+  /log add @alias -docker <name>   Register Docker container log
+  /log list                        List registered logs
+  /log @alias [-n lines]           View registered log
+  /log @alias --search [pattern]   Search error/warn (default: error filter)
+  /log @alias --live [-n lines]    Real-time log streaming
+  /log /path/to/file [-n lines]    Direct path view (no registration needed)
+  /log /path/to/file --live        Direct path real-time streaming
+  /log remove @alias               Unregister log
 
-  /docker ps                       실행 중인 컨테이너 목록
-  /docker add @alias <container>   컨테이너 alias 등록
-  /docker list                     등록된 Docker alias 목록
-  /docker @alias [-n lines]        등록된 컨테이너 로그 보기
-  /docker @alias --search [pat]    에러/패턴 검색
-  /docker @alias --live            실시간 스트리밍
-  /docker remove @alias            alias 해제
-  /docker logs <container>         컨테이너 로그 직접 보기 [-n lines]
-  /docker search <container>       에러/패턴 검색 (직접) [pattern] [-n lines]
-  /docker live <container>         실시간 스트리밍 (직접) [-n lines]
+  /docker ps                       List running containers
+  /docker add @alias <container>   Register container alias
+  /docker list                     List registered Docker aliases
+  /docker @alias [-n lines]        View registered container logs
+  /docker @alias --search [pat]    Search error/pattern
+  /docker @alias --live            Real-time streaming
+  /docker remove @alias            Unregister alias
+  /docker logs <container>         View container logs directly [-n lines]
+  /docker search <container>       Search error/pattern (direct) [pattern] [-n lines]
+  /docker live <container>         Real-time streaming (direct) [-n lines]
 
-  /logs [path] [lines]             로그 직접 보기 (기존)
-  /ask <question>                  Gemini에게 질문 (GEMINI_API_KEY 필요)
-  /clear                           대화 기록 초기화
-  /help                            도움말
-  /exit                            종료
+  /logs [path] [lines]             Direct log view
+  /ask <question>                  Ask Gemini (requires GEMINI_API_KEY)
+  /clear                           Clear conversation history
+  /help                            Show this help
+  /exit                            Exit
 
-자연어로도 바로 물어볼 수 있어요:
-  "CPU 왜 이렇게 높아?"  "nginx 서비스 확인해줘"  "메모리 언제 부족해질까?"
-  "@api 로그에서 에러 확인해줘"  "@nginx timeout 찾아줘"\""""
+You can also ask in natural language:
+  "Why is the CPU so high?"  "Check nginx service"  "When will memory run out?"
+  "Find errors in @api logs"  "Search for timeout in @nginx"\""""
 
 
 _HISTORY: list[str] = []
 
 
 def _read_line(prompt_str: str) -> str:
-    """raw TTY 한 줄 읽기.
+    """Read one line from raw TTY.
 
-    지원:
-    - 멀티바이트 UTF-8 (한글 등)  — 바이트 누적 후 완성된 코드포인트만 처리
-    - 좌/우 방향키 커서 이동 · Delete 키
-    - 위/아래 방향키 히스토리 탐색
-    - Ctrl-A/E/K/U/W  readline 단축키
-    - '/'를 첫 글자로 입력 시 라이브 피커 즉시 실행
+    Supports:
+    - Multi-byte UTF-8
+    - Left/Right arrow cursor movement, Delete key
+    - Up/Down arrow history navigation
+    - Ctrl-A/E/K/U/W readline shortcuts
+    - '/' as first character triggers live picker
     """
     try:
         import termios as _T
@@ -429,9 +429,9 @@ def _prompt_api_key_setup(settings: Settings) -> Settings:
     from monix.config.keystore import save_api_key
     from monix.llm.gemini import GeminiClient
 
-    print("\n  Gemini API 키를 등록하면 AI 기능을 사용할 수 있습니다.")
-    print("  붙여넣기 가능 (입력 내용은 보안상 표시되지 않습니다).")
-    print("  건너뛰려면 Enter를 누르세요.\n")
+    print("\n  Register Gemini API key to enable AI features.")
+    print("  Pasting is supported (input is hidden for security).")
+    print("  Press Enter to skip.\n")
     for attempt in range(3):
         try:
             key = getpass.getpass("  Gemini API Key: ").strip()
@@ -440,11 +440,11 @@ def _prompt_api_key_setup(settings: Settings) -> Settings:
             break
         if not key:
             break
-        print("  키 유효성 확인 중...", end="", flush=True)
+        print("  Validating key...", end="", flush=True)
         ok, err = GeminiClient.validate(key, settings.model)
         if ok:
             save_api_key(key)
-            print("\r  ✓ API 키가 저장되었습니다.             ")
+            print("\r  ✓ API key saved.                       ")
             return Settings(
                 gemini_api_key=key,
                 model=settings.model,
@@ -454,11 +454,11 @@ def _prompt_api_key_setup(settings: Settings) -> Settings:
             )
         else:
             remaining = 2 - attempt
-            msg = f"\r  ✗ 유효하지 않은 키입니다. ({err})"
+            msg = f"\r  ✗ Invalid key. ({err})"
             if remaining > 0:
-                msg += f" 다시 시도하세요. ({remaining}회 남음)"
+                msg += f" Try again. ({remaining} attempts left)"
             print(msg + "             ")
-    print("  AI 기능 없이 Local monitor 모드로 시작합니다.\n")
+    print("  Starting in Local monitor mode without AI features.\n")
     return settings
 
 
@@ -483,9 +483,9 @@ def repl(settings: Settings | None = None) -> int:
         try:
             output = dispatch(raw, settings, history)
         except KeyboardInterrupt:
-            output = "Interrupted. / 중단했습니다."
+            output = "Interrupted."
         except Exception as exc:
-            output = f"Error: {exc} / 오류: {exc}"
+            output = f"Error: {exc}"
         if output:
             print(render_reply(output))
         if raw:
@@ -511,7 +511,7 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
     if command == "/clear":
         if history is not None:
             history.clear()
-        return "대화 기록을 초기화했습니다. 새로운 대화를 시작해요!"
+        return "Conversation history cleared. Let's start a new one!"
     if command == "/stat":
         metric = args[0] if args else None
         return stat(settings, metric)
@@ -541,28 +541,31 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
     if command == "/logs":
         if not args:
             return (
-                "사용법: /logs <경로> [줄수]\n"
-                "예시: /logs /var/log/syslog 100\n\n"
-                "alias 등록/관리는 /log 명령어를 사용하세요:\n"
-                "  /log add @alias -app <경로>   로그 등록\n"
-                "  /log @alias [-n 줄수]         등록된 로그 보기\n"
-                "  /log list                     등록된 목록 확인"
+                "Usage: /logs <path> [lines]\n"
+                "Example: /logs /var/log/syslog 100\n\n"
+                "To manage aliases, use /log command:\n"
+                "  /log add @alias -app <path>   Register log\n"
+                "  /log @alias [-n lines]        View registered log\n"
+                "  /log list                     List registered logs"
             )
         path = args[0]
+        err = _validate_flags(args[1:], frozenset(), "/logs <path> [lines]")
+        if err:
+            return err
         lines = _int_arg(args, 1, 80)
         log = _run_with_indicator("tail_log", tail_log, path, lines)
         return render_logs(log)
     if command == "/service":
         if not args:
-            return "사용법: /service <name>"
+            return "Usage: /service <name>"
         svc = _run_with_indicator("service_status", service_status, args[0])
         return render_service(svc)
     if command == "/ask":
         if not args:
-            return "사용법: /ask <question>"
-        with Spinner("Gemini에 질문 중..."):
+            return "Usage: /ask <question>"
+        with Spinner("Asking Gemini..."):
             return answer(" ".join(args), settings, history)
-    return f"알 수 없는 명령입니다: {command}\n/help를 입력해 사용 가능한 명령을 확인하세요."
+    return f"Unknown command: {command}\nType /help to see available commands."
 
 
 def dispatch_natural(raw: str, settings: Settings | None = None, history: list[dict] | None = None) -> str:
@@ -704,6 +707,13 @@ def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG00
         if entry.type != "docker":
             return f"@{alias} 는 docker 타입이 아닙니다. ({entry.type})\n  /log @{alias} 로 접근하세요."
         container = entry.container or ""
+        err = _validate_flags(
+            args[1:],
+            frozenset({"-n", "--live", "--search"}),
+            f"/docker @{alias} [-n N] [--search [pattern]] [--live]",
+        )
+        if err:
+            return err
         if "--live" in args:
             return _docker_live(container, _get_opt(args, "-n", 20))
         if "--search" in args:
@@ -735,12 +745,18 @@ def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG00
         container, err = _resolve_docker_container(args[1])
         if err:
             return err
+        err = _validate_flags(args[2:], frozenset({"-n"}), f"/docker logs {args[1]} [-n N]")
+        if err:
+            return err
         return render_logs(tail_container(container, _get_opt(args, "-n", 80)))
 
     if sub == "search":
         if len(args) < 2:
             return "사용법: /docker search <container|@alias> [pattern] [-n lines]"
         container, err = _resolve_docker_container(args[1])
+        if err:
+            return err
+        err = _validate_flags(args[2:], frozenset({"-n"}), f"/docker search {args[1]} [pattern] [-n N]")
         if err:
             return err
         pattern_candidates = [a for a in args[2:] if not a.startswith("-")]
@@ -751,6 +767,9 @@ def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG00
         if len(args) < 2:
             return "사용법: /docker live <container|@alias> [-n lines]"
         container, err = _resolve_docker_container(args[1])
+        if err:
+            return err
+        err = _validate_flags(args[2:], frozenset({"-n"}), f"/docker live {args[1]} [-n N]")
         if err:
             return err
         return _docker_live(container, _get_opt(args, "-n", 20))
@@ -846,6 +865,13 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
                     f"Registered aliases:\n{hint}\n\n"
                     f"Use /log add @{alias} -app /path/to/file to register."
                 )
+            err = _validate_flags(
+                args[1:],
+                frozenset({"-n", "--live", "--search"}),
+                f"/log @{alias} [-n N] [--search [pattern]] [--live]",
+            )
+            if err:
+                return err
             n = _get_opt(args, "-n", 80)
             if "--live" in args:
                 return _live_log(entry, n)
@@ -861,6 +887,13 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
         raw_path = sub
 
     if raw_path is not None:
+        err = _validate_flags(
+            args[1:],
+            frozenset({"-n", "--live"}),
+            f"/log {raw_path} [-n N] [--live]",
+        )
+        if err:
+            return err
         n = _get_opt(args, "-n", 80)
         if "--live" in args:
             from monix.render import style
@@ -982,6 +1015,35 @@ def _get_opt(args: list[str], flag: str, default: int) -> int:
         return int(args[idx + 1])
     except (ValueError, IndexError):
         return default
+
+
+def _validate_flags(args: list[str], allowed: frozenset[str], usage: str) -> str | None:
+    """Return an error message if args contain any flag not in `allowed`, else None.
+
+    Skips the value token after -n and after --search (when the value doesn't start with -).
+    """
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token.startswith("-"):
+            if token not in allowed:
+                hint = ", ".join(sorted(allowed)) if allowed else "없음"
+                return f"잘못된 옵션: {token!r}\n사용법: {usage}\n유효한 옵션: {hint}"
+            if token == "-n":
+                if i + 1 >= len(args):
+                    return f"-n 뒤에 숫자를 입력해주세요.\n사용법: {usage}"
+                try:
+                    int(args[i + 1])
+                except ValueError:
+                    return f"-n 뒤에 숫자가 와야 합니다: {args[i + 1]!r}\n사용법: {usage}"
+                i += 2
+                continue
+            if token == "--search":
+                if i + 1 < len(args) and not args[i + 1].startswith("-"):
+                    i += 2
+                    continue
+        i += 1
+    return None
 
 
 def _int_arg(args: list[str], index: int, default: int) -> int:

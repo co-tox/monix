@@ -16,7 +16,8 @@
       "Bash(.venv/bin/pytest tests/tools/test_logs_search.py::test_log_search_natural_error_filter -v)",
       "Bash(python -m pytest tests/ -q --tb=short)",
       "Bash(python3 -m pytest tests/ -q --tb=short)",
-      "Bash(grep -E \"\\\\.py$\")"
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(python3 *)"
     ]
   }
 }

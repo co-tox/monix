@@ -31,10 +31,53 @@ COMMANDS: list[tuple[str, str]] = [
     ("/stat",    "종합 단발 스냅샷  swap · net · io 포함"),
 ]
 
-NO_ARG_COMMANDS = {"/status", "/stat", "/cpu", "/memory", "/disk", "/swap", "/net", "/io", "/clear", "/help", "/exit"}
+# Subcommand options revealed when the user types "<command> " (trailing space)
+# in the picker — e.g. "log " expands to /log add, /log list, /log remove, ...
+SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
+    "/log": [
+        ("add",          "@alias -app|-nginx|-docker <path>  로그 등록"),
+        ("list",         "등록된 로그 목록"),
+        ("remove",       "@alias  등록 해제"),
+        ("docker-list",  "실행 중인 Docker 컨테이너 목록"),
+    ],
+    "/docker": [
+        ("ps",      "실행 중인 컨테이너 목록"),
+        ("add",     "@alias <container>  컨테이너 등록"),
+        ("list",    "등록된 alias 목록"),
+        ("logs",    "<container|@alias> [-n lines]  로그 보기"),
+        ("search",  "<container|@alias> [pattern]  에러/패턴 검색"),
+        ("live",    "<container|@alias> [-n lines]  실시간 스트리밍"),
+        ("remove",  "@alias  등록 해제"),
+    ],
+    "/watch": [
+        ("cpu",     "CPU 사용률 모니터링  [초]"),
+        ("memory",  "메모리 모니터링  [초]"),
+        ("disk",    "디스크 모니터링  [초]"),
+        ("swap",    "스왑 모니터링  [초]"),
+        ("net",     "네트워크 모니터링  [초]"),
+        ("io",      "디스크 I/O 모니터링  [초]"),
+    ],
+    "/stat": [
+        ("cpu",     "CPU 단발 스냅샷"),
+        ("memory",  "메모리 단발 스냅샷"),
+        ("disk",    "디스크 단발 스냅샷"),
+        ("swap",    "스왑 단발 스냅샷"),
+        ("net",     "네트워크 단발 스냅샷"),
+        ("io",      "디스크 I/O 단발 스냅샷"),
+    ],
+}
 
-# Fixed height = one slot per command (filter lives on the prompt line itself).
-_PICKER_BLOCK = len(COMMANDS)
+NO_ARG_COMMANDS = {
+    "/status", "/stat", "/cpu", "/memory", "/disk", "/swap", "/net", "/io",
+    "/clear", "/help", "/exit",
+    # subcommands that take no further args — Enter immediately submits.
+    "/log list", "/log docker-list",
+    "/docker ps", "/docker list",
+}
+
+# Fixed height = max(top-level, longest subcommand list) so subcommand views
+# never overflow the reserved drop-down rows.
+_PICKER_BLOCK = max(len(COMMANDS), *(len(v) for v in SUBCOMMANDS.values()))
 
 
 def pick_with_filter(prompt_prefix: str = "") -> str | None:
@@ -87,7 +130,24 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         query = "".join(query_buf)
         if not query:
             return list(COMMANDS)
-        prefix = ("/" + query).lower()
+
+        # Subcommand mode: "log " / "log a" / "docker ps" → expand SUBCOMMANDS
+        if " " in query:
+            head, _, sub_query = query.partition(" ")
+            head_cmd = "/" + head.lower()
+            if head_cmd in SUBCOMMANDS:
+                sub_prefix = sub_query.lower()
+                return [
+                    (f"{head_cmd} {sub}", desc)
+                    for sub, desc in SUBCOMMANDS[head_cmd]
+                    if sub.lower().startswith(sub_prefix)
+                ]
+            # Unknown command before the space — fall back to filtering by the
+            # head only so the user still sees something useful.
+            prefix = head_cmd
+        else:
+            prefix = ("/" + query).lower()
+
         return [(cmd, desc) for cmd, desc in COMMANDS if cmd.lower().startswith(prefix)]
 
     def _filter_inline() -> str:
