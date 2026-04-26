@@ -127,6 +127,18 @@ def test_detect_log_alias_no_at_sign():
     assert _detect_log_alias("로그 에러 확인해줘") is None
 
 
+def test_detect_log_alias_korean_particle_suffix(tmp_path, monkeypatch):
+    """@alias의 — Korean particle attached to alias should still resolve."""
+    reg_file = tmp_path / ".monix" / "log_registry.json"
+    monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_DIR", tmp_path / ".monix")
+    monkeypatch.setattr("monix.tools.logs.registry._REGISTRY_FILE", reg_file)
+    reg_file.parent.mkdir(parents=True)
+    reg_file.write_text(json.dumps([{"alias": "application", "type": "app", "path": "/x.log", "container": None}]))
+
+    from monix.cli import _detect_log_alias
+    assert _detect_log_alias("@application의 WARN로그만 보여줘") == "application"
+
+
 # ── _extract_search_pattern ───────────────────────────────────────────────────
 
 def test_extract_pattern_quoted():
@@ -150,6 +162,12 @@ def test_extract_pattern_returns_none_for_pure_intent():
     from monix.cli import _extract_search_pattern
     result = _extract_search_pattern("@api 로그를 검색해서 에러가 있는지 확인해줘", "api")
     assert result is None
+
+
+def test_extract_pattern_mixed_ascii_korean():
+    from monix.cli import _extract_search_pattern
+    result = _extract_search_pattern("@application의 WARN로그만 보여줘", "application")
+    assert result == "warn"
 
 
 # ── _detect_log_intent ───────────────────────────────────────────────────────
@@ -177,6 +195,11 @@ def test_detect_intent_search_for_오류():
 def test_detect_intent_default_tail():
     from monix.cli import _detect_log_intent
     assert _detect_log_intent("@api 로그") == "tail"
+
+
+def test_detect_intent_warn_filter():
+    from monix.cli import _detect_log_intent
+    assert _detect_log_intent("@application의 WARN로그만 보여줘") == "search"
 
 
 # ── _extract_lines_count ──────────────────────────────────────────────────────

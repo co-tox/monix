@@ -422,7 +422,8 @@ def _get_str_opt(args: list[str], flag: str) -> str | None:
 # 에러/패턴 검색 인텐트 — 이 단어가 있으면 search_log 로 라우팅
 _ERROR_INTENTS = frozenset({
     "에러", "에러가", "에러있어", "오류", "오류가", "있는지", "있나", "있어",
-    "error", "errors", "exception", "fatal", "critical",
+    "경고", "경고가",
+    "error", "errors", "exception", "fatal", "critical", "warn", "warning",
 })
 
 # tail(보기) 인텐트 — 에러 인텐트보다 약하며, 에러 인텐트가 없을 때 tail 로 라우팅
@@ -447,7 +448,7 @@ _LOG_SEARCH_STOPWORDS = frozenset({
 def _detect_log_alias(text: str) -> str | None:
     """Return alias name if text contains @alias that exists in the registry."""
     import re as _re
-    match = _re.search(r"@(\w+)", text)
+    match = _re.search(r"@([a-zA-Z0-9_]+)", text)
     if not match:
         return None
     alias = match.group(1)
@@ -476,9 +477,16 @@ def _extract_search_pattern(text: str, alias: str) -> str | None:
         clean = token.strip("@.,?!:；。").lower()
         if clean in skip or not clean:
             continue
-        # Keep ASCII alphanumeric tokens that look like keywords (e.g. "500", "timeout")
+        # Pure ASCII alphanumeric token (e.g. "timeout", "500")
         if _re.match(r"^[a-zA-Z0-9_\-\.]+$", clean):
             candidates.append(clean)
+            continue
+        # Mixed token with ASCII prefix (e.g. "WARN로그만" → "warn")
+        ascii_prefix = _re.match(r"^([a-zA-Z][a-zA-Z0-9_]*)(?=[^a-zA-Z0-9_])", clean)
+        if ascii_prefix:
+            prefix = ascii_prefix.group(1)
+            if prefix not in skip:
+                candidates.append(prefix)
 
     return candidates[0] if candidates else None
 
@@ -520,11 +528,19 @@ def _detect_log_intent(text: str) -> str:
     """Return 'search' or 'tail' based on keywords in the natural language text.
 
     Rules (in priority order):
-    1. Explicit error keywords (에러, 오류, error …)  → 'search'
+    1. Explicit error keywords (에러, 오류, error, warn …)  → 'search'
     2. Explicit tail keywords (마지막, 최근, 출력 …) without error words → 'tail'
     3. Default → 'tail'  (safer: showing lines is more useful than empty results)
     """
-    tokens = {t.strip("@.,?!:；。").lower() for t in text.split()}
+    import re as _re
+    tokens: set[str] = set()
+    for t in text.split():
+        clean = t.strip("@.,?!:；。").lower()
+        tokens.add(clean)
+        # Extract ASCII prefix from mixed tokens (e.g. "WARN로그만" → "warn")
+        ascii_m = _re.match(r"^([a-z][a-z0-9_]*)(?=[^a-z0-9_])", clean)
+        if ascii_m:
+            tokens.add(ascii_m.group(1))
     if tokens & _ERROR_INTENTS:
         return "search"
     if tokens & _TAIL_INTENTS:
