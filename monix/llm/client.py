@@ -24,6 +24,9 @@ MODEL_FLASH = "gemini-3.1-flash-preview"
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 _HTTP_TIMEOUT = 20
 
+_DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 1024
+_DEFAULT_TOOLS_MAX_OUTPUT_TOKENS = 2048
+
 
 class GeminiClient:
     """Gemini `generateContent` HTTP client.
@@ -34,9 +37,15 @@ class GeminiClient:
         the raw first candidate plus usage info.
     """
 
-    def __init__(self, api_key: Optional[str], model: str) -> None:
+    def __init__(
+        self,
+        api_key: Optional[str],
+        model: str,
+        max_output_tokens: Optional[int] = None,
+    ) -> None:
         self.api_key = api_key
         self.model = model
+        self.max_output_tokens = max_output_tokens
 
     @property
     def enabled(self) -> bool:
@@ -48,7 +57,11 @@ class GeminiClient:
         payload = {
             "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
             "contents": history,
-            "generationConfig": {"maxOutputTokens": 1024},
+            "generationConfig": {
+                "maxOutputTokens": self.max_output_tokens
+                if self.max_output_tokens is not None
+                else _DEFAULT_CHAT_MAX_OUTPUT_TOKENS,
+            },
         }
         try:
             data = self._post(payload)
@@ -82,7 +95,11 @@ class GeminiClient:
         payload: dict[str, Any] = {
             "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
             "contents": history,
-            "generationConfig": {"maxOutputTokens": 2048},
+            "generationConfig": {
+                "maxOutputTokens": self.max_output_tokens
+                if self.max_output_tokens is not None
+                else _DEFAULT_TOOLS_MAX_OUTPUT_TOKENS,
+            },
         }
         if function_declarations:
             payload["tools"] = [{"functionDeclarations": function_declarations}]

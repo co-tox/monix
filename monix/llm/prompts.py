@@ -41,4 +41,11 @@ answering, check this timestamp; if the user is asking about the "current"
 or "latest" state and the data is stale (e.g., tens of seconds old or
 older), call the same tool again to refresh. Reuse prior tool results when
 they are still recent enough to avoid redundant calls.
+
+[Output Format]
+Do not use Markdown bold syntax. Never wrap text in double asterisks
+(`**text**`) or double underscores (`__text__`). The rendered output is
+plain terminal text, so emphasis markers appear as literal characters and
+hurt readability. If you need to highlight a key value, quote it with
+backticks or place it on its own line; do not use bold.
 """
