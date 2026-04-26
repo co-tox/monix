@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 
 from monix import __version__
 from monix.tools.system import human_bytes
@@ -22,18 +23,27 @@ _ISO_TS_RE = re.compile(
 # [INFO] / [DEBUG] / [TRACE] / [NOTICE] bracket level tags
 _BRACKET_INFO_RE = re.compile(r"\[(?:INFO|NOTICE|DEBUG|TRACE)\]", re.IGNORECASE)
 
+_BANNER = [
+    "▓▓▓    ▓▓▓  ▓▓▓▓▓▓  ▓▓▓   ▓▓  ▓▓  ▓▓   ▓▓",
+    "▓▓▓▓  ▓▓▓▓ ▓▓    ▓▓ ▓▓▓▓  ▓▓  ▓▓   ▓▓ ▓▓ ",
+    "▓▓ ▓▓▓▓ ▓▓ ▓▓    ▓▓ ▓▓ ▓▓ ▓▓  ▓▓    ▓▓▓  ",
+    "▓▓  ▓▓  ▓▓ ▓▓    ▓▓ ▓▓  ▓▓▓▓  ▓▓   ▓▓ ▓▓ ",
+    "▓▓      ▓▓  ▓▓▓▓▓▓  ▓▓   ▓▓▓  ▓▓  ▓▓   ▓▓",
+]
+# 256-color cyan gradient: dark teal → bright aqua (top → bottom)
+_BANNER_GRAD = [23, 30, 37, 44, 51]
+
 _MASCOT = [
-    r"        ███        ",
-    r"      ███████      ",
-    r"     █████████     ",
-    r"      █     █     ",
-    r"      █     █     ",
-    r"    ███████████    ",
-    r"   █████████████   ",
-    r"  ███████████████  ",
-    r"  ████  ███  ████  ",
-    r"   █████████████  ",
-    r"    ███████████   ",
+    r"         ███        ",
+    r"       ███████      ",
+    r"      █████████     ",
+    r"       █     █      ",
+    r"       █     █      ",
+    r"      █████████     ",
+    r"     ███████████    ",
+    r"    ███  ███  ███   ",
+    r"    █████████████   ",
+    r"     ███████████    ",
 ]
 
 
@@ -46,20 +56,71 @@ def render_welcome(snapshot: dict, gemini_enabled: bool) -> str:
     disk = (snapshot.get("disks") or [{}])[0]
     memory = snapshot.get("memory", {})
 
-    mascot_lines = [_text(style(line, "cyan"), inner) for line in _MASCOT]
+    # Banner: borderless centered MONIX ASCII art with 256-color gradient
+    def _banner_row(line: str, color_code: int) -> str:
+        pad = max(0, (width - len(line)) // 2)
+        if supports_color():
+            return f"\033[38;5;{color_code}m{' ' * pad}{line}\033[0m"
+        return " " * pad + line
+
+    banner_section = (
+        [""]
+        + [_banner_row(line, _BANNER_GRAD[i]) for i, line in enumerate(_BANNER)]
+        + [""]
+    )
+
+    # Side-by-side: mascot (left) + right column (metrics ─── info)
+    mascot_w = max(len(line) for line in _MASCOT)
+    sep = 2
+    right_inner = inner - mascot_w - sep
+    bar_w = 16 if right_inner >= 50 else max(8, right_inner - 28)
+
+    def _rm(label: str, value: float | None, suffix: str = "") -> str:
+        bar = _bar(value, width=bar_w)
+        suf = f"  {style(suffix, 'muted')}" if suffix and right_inner >= 50 else ""
+        return f"{style(f'{label:<9}', 'cyan')} {bar} {_percent(value):>7}{suf}"
+
+    def _rl(label: str, value: str) -> str:
+        return f"{style(f'{label:<9}', 'cyan')} {value}"
+
+    metric_rows: list[str] = [
+        _rm("CPU", snapshot.get("cpu_percent")),
+        _rm("Memory", memory.get("percent"), f"{human_bytes(memory.get('available'))} free"),
+        _rm("Disk /", disk.get("percent"), f"{human_bytes(disk.get('free'))} free"),
+        _rl("Load", _load(snapshot.get("load_average"))),
+        _rl("Status", alert_text),
+    ]
+    info_rows: list[str] = [
+        f"{style('Monix', 'bold')} {style('server monitor', 'muted')}  v{__version__}  {mode}",
+        f"{style('Host', 'cyan')} {snapshot.get('host', 'unknown')}  {style(snapshot.get('os', ''), 'muted')}",
+    ]
+    divider = style("─" * right_inner, "muted")
+    content_rows = metric_rows + [divider] + info_rows
+
+    n_mascot = len(_MASCOT)
+    n_content = len(content_rows)
+    pad_top = (n_mascot - n_content) // 2
+    pad_bottom = n_mascot - n_content - pad_top
+    right_rows = [""] * pad_top + content_rows + [""] * pad_bottom
+
+    def _combined(mascot_line: str, right_content: str) -> str:
+        left_raw = style(mascot_line, "cyan")
+        left_pad = " " * (mascot_w - len(mascot_line))
+        right_clipped = _clip_ansi(right_content, right_inner)
+        right_pad = " " * (right_inner - _visible_len(right_clipped))
+        return (
+            f"{style('│', 'muted')} "
+            f"{left_raw}{left_pad}{' ' * sep}"
+            f"{right_clipped}{right_pad} "
+            f"{style('│', 'muted')}"
+        )
+
+    combined = [_combined(m, right_rows[i]) for i, m in enumerate(_MASCOT)]
 
     lines = [
+        *banner_section,
         _rule(width, "top"),
-        *mascot_lines,
-        _rule(width, "mid"),
-        _text(f"{style('Monix', 'bold')} {style('server monitor', 'muted')}  v{__version__}  {mode}", inner),
-        _text(f"{style('Host', 'cyan')} {snapshot.get('host', 'unknown')}  {style(snapshot.get('os', ''), 'muted')}", inner),
-        _rule(width, "mid"),
-        _metric("CPU", snapshot.get("cpu_percent"), inner),
-        _metric("Memory", memory.get("percent"), inner, suffix=f"{human_bytes(memory.get('available'))} free"),
-        _metric("Disk /", disk.get("percent"), inner, suffix=f"{human_bytes(disk.get('free'))} free"),
-        _line("Load", _load(snapshot.get("load_average")), inner),
-        _line("Status", alert_text, inner),
+        *combined,
         _rule(width, "mid"),
         _text(f"{style('Ask me anything!', 'bold')}  Check CPU    Why is nginx slow?    Memory analysis", inner),
         _text(f"{style('/help', 'cyan')} Commands   {style('/clear', 'cyan')} Clear history   {style('/watch cpu', 'cyan')} Real-time   {style('/exit', 'cyan')} Exit", inner),
@@ -1023,7 +1084,8 @@ def _visible_len(value: str) -> int:
             if char == "m":
                 in_escape = False
             continue
-        length += 1
+        eaw = unicodedata.east_asian_width(char)
+        length += 2 if eaw in ("W", "F") else 1
     return length
 
 
@@ -1041,10 +1103,12 @@ def _clip_ansi(value: str, max_len: int) -> str:
             if char == "m":
                 in_escape = False
             continue
-        if visible >= max_len:
+        eaw = unicodedata.east_asian_width(char)
+        char_width = 2 if eaw in ("W", "F") else 1
+        if visible + char_width > max_len:
             break
         result.append(char)
-        visible += 1
+        visible += char_width
     if supports_color() and result and not "".join(result).endswith("\033[0m"):
         result.append("\033[0m")
     return "".join(result)

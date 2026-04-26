@@ -112,7 +112,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         return None
 
     N = len(COMMANDS)
-    BLOCK = _PICKER_BLOCK  # = N  (items only; filter is on P)
+    BLOCK = _PICKER_BLOCK
 
     query_buf: list[str] = []
     q_cursor = 0
@@ -143,7 +143,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         return w
 
     def _items() -> list[tuple[str, str]]:
-        query = "".join(query_buf)
+        query = "".join(query_buf).lstrip("/")
         if not query:
             return list(COMMANDS)
 
@@ -168,7 +168,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
 
     def _filter_inline() -> str:
         """The /query string shown after prompt (with ANSI)."""
-        query = "".join(query_buf)
+        query = "".join(query_buf).lstrip("/")
         if query:
             return f"\033[36m/\033[1m{query}\033[0m"
         return "\033[36m/\033[0m"
@@ -231,7 +231,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         out.append("\r\033[K")              # Clear P (cursor at P col 0)
         for _ in range(BLOCK):
             out.append("\033[1B\r\033[K")   # Clear P+1 ~ P+N
-        out.append(f"\033[{BLOCK + 1}A\r")  # Back to P col 0
+        out.append(f"\033[{BLOCK}A\r")      # Back to P col 0
         sys.stdout.write("".join(out))
         sys.stdout.flush()
 
@@ -335,7 +335,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
                     try:
                         char = pending.decode("utf-8")
                         pending.clear()
-                        if char.isprintable() and char != "/":
+                        if char.isprintable():
                             query_buf.insert(q_cursor, char)
                             q_cursor += 1
                             idx = 0
