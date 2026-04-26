@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import unicodedata
 
 try:
     import termios
@@ -33,92 +34,114 @@ COMMANDS: list[tuple[str, str]] = [
 NO_ARG_COMMANDS = {"/status", "/stat", "/cpu", "/memory", "/disk", "/swap", "/net", "/io", "/clear", "/help", "/exit"}
 
 # Fixed height: filter line + blank separator + one slot per command.
-# Pre-allocating this many lines prevents terminal scroll during redraws.
 _PICKER_BLOCK = 2 + len(COMMANDS)
 
 
 def pick_with_filter() -> str | None:
-    """라이브 필터 피커 — 고정 높이 블록을 미리 확보해 in-place 업데이트."""
+    """라이브 필터 피커.
+
+    - 고정 높이 블록 선점으로 in-place 업데이트 (스크롤 없음)
+    - 한글 포함 멀티바이트 UTF-8 입력 지원
+    - 좌/우 방향키로 필터 줄 안에서 커서 이동
+    - 매 _draw() 완료 후 커서는 필터 줄(P+1) 안에 위치
+    """
     if not _HAS_TTY or not sys.stdout.isatty():
         return None
 
     N = len(COMMANDS)
     BLOCK = _PICKER_BLOCK  # filter(1) + blank(1) + items(N)
 
-    query = ""
-    idx = 0
+    query_buf: list[str] = []   # 필터 문자 목록
+    q_cursor = 0                # 필터 줄 커서 위치 (문자 단위)
+    idx = 0                     # 선택된 항목 인덱스
     initialized = False
+    pending = bytearray()       # 멀티바이트 누적 버퍼
+
+    # ── 공통 유틸 ────────────────────────────────────────────────────
+    def _cw(c: str) -> int:
+        return 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
+
+    def _q_width(chars) -> int:
+        return sum(_cw(c) for c in chars)
 
     def _items() -> list[tuple[str, str]]:
+        query = "".join(query_buf)
         if not query:
             return list(COMMANDS)
         prefix = ("/" + query).lower()
         return [(cmd, desc) for cmd, desc in COMMANDS if cmd.lower().startswith(prefix)]
 
     def _label() -> str:
+        query = "".join(query_buf)
         if query:
             return f"\033[36m/\033[1m{query}\033[0m"
         return "\033[36m/\033[0m"
 
+    # ── 렌더링 ───────────────────────────────────────────────────────
     def _draw() -> None:
+        """고정 블록을 in-place 갱신하고 커서를 필터 줄(P+1) q_cursor 위치에 둔다."""
         nonlocal initialized
         items = _items()
-        buf = []
+        out = []
 
         if not initialized:
-            # Reserve BLOCK lines below the current prompt line P so that
-            # subsequent redraws never trigger terminal scrolling.
-            # "\r\n" × BLOCK lands cursor at col 0 of line P+BLOCK.
-            buf.append("\r\n" * BLOCK)
-            # Step back BLOCK-1 lines → P+1 (first line of the picker block).
-            buf.append(f"\033[{BLOCK - 1}A\r")
+            # P+1 ~ P+BLOCK 라인을 미리 확보한다.
+            # "\r\n" × BLOCK → 커서 P+BLOCK col 0
+            out.append("\r\n" * BLOCK)
+            # BLOCK-1 줄 위로 → P+1 col 0
+            out.append(f"\033[{BLOCK - 1}A\r")
             initialized = True
         else:
-            # After the previous _draw(), cursor is at end of the last item
-            # on line P+BLOCK. Go up BLOCK-1 to return to P+1.
-            buf.append(f"\033[{BLOCK - 1}A\r")
+            # 이전 _draw() 후 커서는 P+1(필터 줄) q_cursor 위치.
+            # \r 로 col 0 으로 이동.
+            out.append("\r")
 
-        # P+1: filter bar
-        buf.append(f"\r\033[K{_label()}\n")
-        # P+2: blank separator
-        buf.append(f"\r\033[K\n")
-        # P+3 … P+N+2: always N fixed slots (blank-pad when filtered)
+        # P+1: 필터 줄
+        out.append(f"\033[K{_label()}")
+
+        # P+2: 빈 구분선  (\033[1B\r = 스크롤 없이 한 줄 아래 col 0)
+        out.append("\033[1B\r\033[K")
+
+        # P+3 ~ P+BLOCK: 항목 (항상 N 슬롯 — 필터링 결과 개수 무관)
         for i in range(N):
+            out.append("\033[1B\r")
             if not items:
-                line = (
-                    f"\r\033[K  \033[2m(일치하는 명령어 없음)\033[0m"
-                    if i == 0 else "\r\033[K"
-                )
+                content = "\033[2m(일치하는 명령어 없음)\033[0m" if i == 0 else ""
             elif i < len(items):
                 cmd, desc = items[i]
                 if i == idx:
-                    line = f"\r\033[K  \033[36m❯ {cmd:<12}\033[0m  \033[2m{desc}\033[0m"
+                    content = f"\033[36m❯ {cmd:<12}\033[0m  \033[2m{desc}\033[0m"
                 else:
-                    line = f"\r\033[K    {cmd:<12}  \033[2m{desc}\033[0m"
+                    content = f"  {cmd:<12}  \033[2m{desc}\033[0m"
             else:
-                line = "\r\033[K"
+                content = ""
+            out.append(f"\033[K  {content}" if content else "\033[K")
 
-            # No trailing \n on the last item — keeps cursor on P+BLOCK, not P+BLOCK+1
-            buf.append(line + ("\n" if i < N - 1 else ""))
+        # 커서를 P+1(필터 줄) q_cursor 열로 복원
+        # 현재 커서: P+BLOCK  →  BLOCK-1 줄 위로 이동 → P+1 col 0
+        out.append(f"\033[{BLOCK - 1}A\r")
+        # '/' 1열 + query_buf[:q_cursor] 의 표시 너비
+        q_col = 1 + _q_width(query_buf[:q_cursor])
+        out.append(f"\033[{q_col}C")
 
-        sys.stdout.write("".join(buf))
+        sys.stdout.write("".join(out))
         sys.stdout.flush()
 
     def _clear() -> None:
-        """드롭다운을 지우고 커서를 프롬프트 줄(P) col 0 으로 복원."""
-        buf = []
-        # From P+BLOCK, go up to P+1 (filter line)
-        buf.append(f"\033[{BLOCK - 1}A\r")
-        # Erase lines P+1 … P+BLOCK-1 (each \n advances one line)
+        """드롭다운을 지우고 커서를 프롬프트 줄(P) col 0 으로 복원.
+
+        _draw() 후 커서는 P+1(필터 줄)에 있으므로 여기서 출발한다.
+        """
+        out = []
+        out.append("\r")                        # P+1 col 0
         for _ in range(BLOCK - 1):
-            buf.append("\r\033[K\n")
-        # Erase P+BLOCK without advancing (no \n)
-        buf.append("\r\033[K")
-        # Return to prompt line P
-        buf.append(f"\033[{BLOCK}A\r")
-        sys.stdout.write("".join(buf))
+            out.append("\033[K\033[1B\r")       # 지우고 한 줄 아래 col 0
+        out.append("\033[K")                    # P+BLOCK 지우기 (줄 이동 없음)
+        out.append(f"\033[{BLOCK}A\r")          # P col 0 으로 복귀
+        sys.stdout.write("".join(out))
         sys.stdout.flush()
 
+    # ── 이벤트 루프 ──────────────────────────────────────────────────
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd)
 
@@ -129,43 +152,92 @@ def pick_with_filter() -> str | None:
         while True:
             b = sys.stdin.buffer.read(1)
 
+            # ── Escape 시퀀스 ────────────────────────────────────────
             if b == b"\x1b":
                 b2 = sys.stdin.buffer.read(1)
                 if b2 == b"[":
                     b3 = sys.stdin.buffer.read(1)
-                    items = _items()
-                    n = max(len(items), 1)
-                    if b3 == b"A":
+                    if b3 == b"A":    # 위 → 목록 위로
+                        n = max(len(_items()), 1)
                         idx = (idx - 1) % n
-                    elif b3 == b"B":
+                    elif b3 == b"B":  # 아래 → 목록 아래로
+                        n = max(len(_items()), 1)
                         idx = (idx + 1) % n
+                    elif b3 == b"C":  # 오른쪽 → 필터 커서 오른쪽
+                        if q_cursor < len(query_buf):
+                            q_cursor += 1
+                    elif b3 == b"D":  # 왼쪽 → 필터 커서 왼쪽
+                        if q_cursor > 0:
+                            q_cursor -= 1
+                    elif b3 == b"H":  # Home
+                        q_cursor = 0
+                    elif b3 == b"F":  # End
+                        q_cursor = len(query_buf)
+                    elif b3.isdigit():
+                        # \x1b[{숫자}~ 또는 \x1b[{숫자};…{letter} 전체 소비
+                        seq = b3
+                        while not (seq[-1:].isalpha() or seq.endswith(b"~")):
+                            seq += sys.stdin.buffer.read(1)
+                        if seq == b"3~" and q_cursor < len(query_buf):  # Delete
+                            query_buf.pop(q_cursor)
+                            idx = 0
+                        elif seq in (b"1~", b"7~"):   # Home 변형
+                            q_cursor = 0
+                        elif seq in (b"4~", b"8~"):   # End 변형
+                            q_cursor = len(query_buf)
                 else:
                     _clear()
                     return None
+
+            # ── Enter → 선택 ─────────────────────────────────────────
             elif b in (b"\r", b"\n"):
                 items = _items()
                 selected = items[idx][0] if items else None
                 _clear()
                 return selected
+
+            # ── Ctrl-C / Ctrl-D → 취소 ───────────────────────────────
             elif b in (b"\x03", b"\x04"):
                 _clear()
                 return None
+
+            # ── Ctrl-A / Ctrl-E ──────────────────────────────────────
+            elif b == b"\x01":
+                q_cursor = 0
+            elif b == b"\x05":
+                q_cursor = len(query_buf)
+
+            # ── Backspace ────────────────────────────────────────────
             elif b == b"\x7f":
-                if query:
-                    query = query[:-1]
+                if q_cursor > 0:
+                    query_buf.pop(q_cursor - 1)
+                    q_cursor -= 1
                     idx = 0
-                else:
+                elif not query_buf:
                     _clear()
                     return None
+
+            # ── 일반 문자 (멀티바이트 UTF-8 포함) ───────────────────
             else:
-                try:
-                    char = b.decode("utf-8")
-                except UnicodeDecodeError:
-                    char = ""
-                if char.isprintable() and char != "/":
-                    query += char
-                    idx = 0
+                pending.extend(b)
+                while pending:
+                    try:
+                        char = pending.decode("utf-8")
+                        pending.clear()
+                        if char.isprintable() and char != "/":
+                            query_buf.insert(q_cursor, char)
+                            q_cursor += 1
+                            idx = 0
+                        break
+                    except UnicodeDecodeError as exc:
+                        if exc.reason == "unexpected end of data" and len(pending) < 4:
+                            pending.extend(sys.stdin.buffer.read(1))
+                        else:
+                            pending.clear()
+                            break
+
             _draw()
+
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 

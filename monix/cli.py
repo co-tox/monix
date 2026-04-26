@@ -6,6 +6,7 @@ import shlex
 import sys
 import threading
 import time
+import unicodedata
 
 from monix import __version__
 from monix.config import Settings
@@ -95,37 +96,213 @@ _HISTORY: list[str] = []
 
 
 def _read_line(prompt_str: str) -> str:
-    """readline/input 기반 입력. 한글 IME와 좌우 이동을 유지하고 '/' 단독 입력 시 피커를 연다."""
+    """raw TTY 한 줄 읽기.
+
+    지원:
+    - 멀티바이트 UTF-8 (한글 등)  — 바이트 누적 후 완성된 코드포인트만 처리
+    - 좌/우 방향키 커서 이동 · Delete 키
+    - 위/아래 방향키 히스토리 탐색
+    - Ctrl-A/E/K/U/W  readline 단축키
+    - '/'를 첫 글자로 입력 시 라이브 피커 즉시 실행
+    """
     try:
-        import readline as _rl
+        import termios as _T
+        import tty as _tty
     except ImportError:
-        _rl = None
+        return input(prompt_str)
 
-    if _rl is not None:
-        existing = {_rl.get_history_item(i) for i in range(1, _rl.get_current_history_length() + 1)}
-        for entry in _HISTORY:
-            if entry and entry not in existing:
-                _rl.add_history(entry)
+    if not sys.stdout.isatty():
+        return input(prompt_str)
 
-    raw = input(prompt_str)
-    if raw.strip() != "/":
-        return raw
+    sys.stdout.write(prompt_str)
+    sys.stdout.flush()
 
-    selected = pick_with_filter() or pick()
-    if not selected:
-        return ""
-    if selected in NO_ARG_COMMANDS:
-        return selected
+    prompt_line = prompt_str.lstrip("\n")
+    buf: list[str] = []
+    cursor_pos = 0          # buf 내 커서 위치 (문자 단위)
+    hist_pos = len(_HISTORY)
+    pending = bytearray()   # 멀티바이트 UTF-8 누적 버퍼
+    fd = sys.stdin.fileno()
+    saved = _T.tcgetattr(fd)
 
-    if _rl is None:
-        return selected
+    def _cw(c: str) -> int:
+        """터미널 열 너비 (전각 2, 그 외 1)."""
+        return 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
 
-    _rl.set_startup_hook(lambda: _rl.insert_text(selected + " "))
+    def _width(chars) -> int:
+        return sum(_cw(c) for c in chars)
+
+    def _redraw() -> None:
+        """buf와 cursor_pos 기준으로 입력 줄 전체를 다시 그린다."""
+        line = "".join(buf)
+        sys.stdout.write(f"\r\033[K{prompt_line}{line}")
+        back = _width(buf[cursor_pos:])
+        if back:
+            sys.stdout.write(f"\033[{back}D")
+        sys.stdout.flush()
+
     try:
-        full = input(prompt()).strip()
+        _tty.setraw(fd)
+        while True:
+            b = sys.stdin.buffer.read(1)
+
+            # ── Enter ────────────────────────────────────────────────
+            if b in (b"\r", b"\n"):
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                return "".join(buf)
+
+            # ── Ctrl-C ───────────────────────────────────────────────
+            if b == b"\x03":
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                raise KeyboardInterrupt
+
+            # ── Ctrl-D ───────────────────────────────────────────────
+            if b == b"\x04":
+                if not buf:
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    raise EOFError
+                continue
+
+            # ── Backspace ────────────────────────────────────────────
+            if b == b"\x7f":
+                if cursor_pos > 0:
+                    buf.pop(cursor_pos - 1)
+                    cursor_pos -= 1
+                    _redraw()
+                continue
+
+            # ── readline 단축키 ──────────────────────────────────────
+            if b == b"\x01":   # Ctrl-A  줄 처음
+                cursor_pos = 0
+                _redraw()
+                continue
+            if b == b"\x05":   # Ctrl-E  줄 끝
+                cursor_pos = len(buf)
+                _redraw()
+                continue
+            if b == b"\x0b":   # Ctrl-K  커서 이후 삭제
+                del buf[cursor_pos:]
+                _redraw()
+                continue
+            if b == b"\x15":   # Ctrl-U  줄 전체 삭제
+                buf.clear()
+                cursor_pos = 0
+                _redraw()
+                continue
+            if b == b"\x17":   # Ctrl-W  단어 하나 역방향 삭제
+                while cursor_pos > 0 and buf[cursor_pos - 1] == " ":
+                    buf.pop(cursor_pos - 1)
+                    cursor_pos -= 1
+                while cursor_pos > 0 and buf[cursor_pos - 1] != " ":
+                    buf.pop(cursor_pos - 1)
+                    cursor_pos -= 1
+                _redraw()
+                continue
+
+            # ── Escape 시퀀스 (방향키, Home, End, Delete) ────────────
+            if b == b"\x1b":
+                b2 = sys.stdin.buffer.read(1)
+                if b2 == b"[":
+                    b3 = sys.stdin.buffer.read(1)
+                    if b3 == b"A":    # 위 — 히스토리 이전
+                        if _HISTORY:
+                            hist_pos = max(0, hist_pos - 1)
+                            buf[:] = list(_HISTORY[hist_pos])
+                            cursor_pos = len(buf)
+                            _redraw()
+                    elif b3 == b"B":  # 아래 — 히스토리 다음
+                        if hist_pos < len(_HISTORY) - 1:
+                            hist_pos += 1
+                            buf[:] = list(_HISTORY[hist_pos])
+                            cursor_pos = len(buf)
+                        else:
+                            hist_pos = len(_HISTORY)
+                            buf.clear()
+                            cursor_pos = 0
+                        _redraw()
+                    elif b3 == b"C":  # 오른쪽
+                        if cursor_pos < len(buf):
+                            cursor_pos += 1
+                            _redraw()
+                    elif b3 == b"D":  # 왼쪽
+                        if cursor_pos > 0:
+                            cursor_pos -= 1
+                            _redraw()
+                    elif b3 == b"H":  # Home
+                        cursor_pos = 0
+                        _redraw()
+                    elif b3 == b"F":  # End
+                        cursor_pos = len(buf)
+                        _redraw()
+                    elif b3.isdigit():
+                        # \x1b[{숫자}~ 또는 \x1b[{숫자};…{letter} 전체 소비
+                        seq = b3
+                        while not (seq[-1:].isalpha() or seq.endswith(b"~")):
+                            seq += sys.stdin.buffer.read(1)
+                        if seq == b"3~" and cursor_pos < len(buf):   # Delete
+                            buf.pop(cursor_pos)
+                            _redraw()
+                        elif seq in (b"1~", b"7~"):   # Home 변형
+                            cursor_pos = 0
+                            _redraw()
+                        elif seq in (b"4~", b"8~"):   # End 변형
+                            cursor_pos = len(buf)
+                            _redraw()
+                        # 그 외(\x1b[1;2C 등)는 소비만 하고 무시
+                continue
+
+            # ── '/' 첫 글자 → 라이브 피커 ───────────────────────────
+            if b == b"/" and not buf:
+                _T.tcsetattr(fd, _T.TCSADRAIN, saved)
+                result = pick_with_filter()
+                if result:
+                    sys.stdout.write(f"\r\033[K{prompt_line}{result}\n")
+                    sys.stdout.flush()
+                    if result in NO_ARG_COMMANDS:
+                        return result
+                    try:
+                        import readline as _rl
+                        _rl.set_startup_hook(lambda: _rl.insert_text(result + " "))
+                        try:
+                            full = input(prompt()).strip()
+                        finally:
+                            _rl.set_startup_hook(None)
+                        return full or result
+                    except ImportError:
+                        return result
+                sys.stdout.write(f"\r\033[K{prompt_line}")
+                sys.stdout.flush()
+                _tty.setraw(fd)
+                buf.clear()
+                cursor_pos = 0
+                pending.clear()
+                hist_pos = len(_HISTORY)
+                continue
+
+            # ── 일반 문자 (멀티바이트 UTF-8 포함) ───────────────────
+            pending.extend(b)
+            while pending:
+                try:
+                    char = pending.decode("utf-8")
+                    pending.clear()
+                    if char.isprintable():
+                        buf.insert(cursor_pos, char)
+                        cursor_pos += 1
+                        _redraw()
+                    break
+                except UnicodeDecodeError as exc:
+                    # 불완전한 멀티바이트 시퀀스 → 다음 바이트를 더 읽음
+                    if exc.reason == "unexpected end of data" and len(pending) < 4:
+                        pending.extend(sys.stdin.buffer.read(1))
+                    else:
+                        pending.clear()
+                        break
+
     finally:
-        _rl.set_startup_hook(None)
-    return full or selected
+        _T.tcsetattr(fd, _T.TCSADRAIN, saved)
 
 
 class Spinner:
