@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 
 from monix import __version__
 from monix.tools.system import human_bytes
+
+_LOG_ERROR_RE = re.compile(r"\b(ERROR|FATAL|CRITICAL|Exception|Traceback)\b", re.IGNORECASE)
+_LOG_WARN_RE = re.compile(r"\b(WARN|WARNING)\b", re.IGNORECASE)
 
 
 _MASCOT = [
@@ -102,7 +106,31 @@ def render_logs(result: dict) -> str:
     header = f"Log: {result['path']} {badge(result['status'], status_color)}"
     if result["status"] != "ok":
         return header
-    return "\n".join([header, *result["lines"]])
+    return "\n".join([header, *(colorize_log_line(line) for line in result["lines"])])
+
+
+def render_log_list(entries: list) -> str:
+    if not entries:
+        return "등록된 로그가 없습니다.\n  /log add @alias -app /path/to/file 로 등록하세요."
+    rows = [style(f"{'ALIAS':<22} {'TYPE':<8} PATH / CONTAINER", "bold")]
+    for e in entries:
+        target = e.path or e.container or "(없음)"
+        rows.append(f"@{e.alias:<21} {e.type:<8} {target}")
+    return "\n".join(rows)
+
+
+def render_log_aliases(alias_list: list[str]) -> str:
+    if not alias_list:
+        return "등록된 로그가 없습니다. /log add 로 등록하세요."
+    return "\n".join(["등록된 로그 (alias):", *(f"  @{a}" for a in alias_list)])
+
+
+def colorize_log_line(line: str) -> str:
+    if _LOG_ERROR_RE.search(line):
+        return style(line, "red")
+    if _LOG_WARN_RE.search(line):
+        return style(line, "yellow")
+    return line
 
 
 def render_service(result: dict) -> str:
