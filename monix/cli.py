@@ -12,7 +12,6 @@ from monix.picker import NO_ARG_COMMANDS, pick
 from monix.tools.logs import follow_log, registry, search_log, tail_log
 from monix.tools.logs.docker import follow_container, list_containers, tail_container
 from monix.tools.logs.nginx import tail_nginx_access
-from monix.tools.processes import top_processes
 from monix.tools.services import service_status
 from monix.tools.system import collect_snapshot, top_processes
 from monix.render import (
