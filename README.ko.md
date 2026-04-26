@@ -3,6 +3,8 @@
 **[English](./README.md) | [한국어](./README.ko.md)**
 
 ## 개요
+<img width="800" height="450" alt="Image" src="https://github.com/user-attachments/assets/e49b62f6-fdd6-4e33-b30d-987be4c2696b" />
+
 
 Monix는 서버 모니터링을 위한 터미널 네이티브 **읽기 전용** AI 어시스턴트입니다. 슬래시 커맨드 CLI와 Gemini 기반 대화형 에이전트를 결합하여, 운영자가 셸을 떠나지 않고 — 그리고 어떠한 파괴적 명령도 실행하지 않고 — CPU, 메모리, 디스크, 프로세스, 서비스, 로그(일반 파일, Nginx, Docker)를 점검할 수 있게 합니다.
 
