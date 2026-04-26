@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from monix.tools.logs import search_log, tail_log
-from monix.tools.logs.docker import search_container, tail_container
+from monix.tools.logs.docker import list_containers, search_container, tail_container
 from monix.tools.logs.nginx import tail_nginx_access
 from monix.tools.services import service_status
 
@@ -22,6 +22,18 @@ class ToolCall:
 # Gemini function_declarations format (also used as source for Anthropic)
 TOOL_DECLARATIONS: list[dict] = [
     {
+        "name": "list_containers",
+        "description": (
+            "List running Docker containers with their name, status, and image. "
+            "Use this first when the user asks about Docker containers but hasn't specified a container name."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
         "name": "tail_log",
         "description": (
             "Read the last N lines from a log file. "
@@ -37,6 +49,7 @@ TOOL_DECLARATIONS: list[dict] = [
                 "lines": {
                     "type": "integer",
                     "description": "Number of lines to return (default 80)",
+                    "minimum": 1,
                 },
             },
             "required": ["path"],
@@ -62,6 +75,7 @@ TOOL_DECLARATIONS: list[dict] = [
                 "lines": {
                     "type": "integer",
                     "description": "Number of lines to scan from the end of the file (default 500)",
+                    "minimum": 1,
                 },
             },
             "required": ["path"],
@@ -83,6 +97,7 @@ TOOL_DECLARATIONS: list[dict] = [
                 "lines": {
                     "type": "integer",
                     "description": "Number of lines to read (default 200)",
+                    "minimum": 1,
                 },
             },
             "required": ["path"],
@@ -90,17 +105,21 @@ TOOL_DECLARATIONS: list[dict] = [
     },
     {
         "name": "tail_container",
-        "description": "Read the last N lines from a Docker container's logs.",
+        "description": (
+            "Read the last N lines from a Docker container's logs. "
+            "Use when the user asks to show or tail a specific container's logs."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "container": {
                     "type": "string",
-                    "description": "Docker container name or ID",
+                    "description": "Docker container name or ID (use list_containers to discover names)",
                 },
                 "lines": {
                     "type": "integer",
                     "description": "Number of lines to return (default 80)",
+                    "minimum": 1,
                 },
             },
             "required": ["container"],
@@ -117,7 +136,7 @@ TOOL_DECLARATIONS: list[dict] = [
             "properties": {
                 "container": {
                     "type": "string",
-                    "description": "Docker container name or ID",
+                    "description": "Docker container name or ID (use list_containers to discover names)",
                 },
                 "pattern": {
                     "type": "string",
@@ -126,6 +145,7 @@ TOOL_DECLARATIONS: list[dict] = [
                 "lines": {
                     "type": "integer",
                     "description": "Number of lines to scan (default 500)",
+                    "minimum": 1,
                 },
             },
             "required": ["container"],
@@ -161,6 +181,7 @@ ANTHROPIC_TOOLS: list[dict] = [
 ]
 
 _HANDLERS: dict[str, Any] = {
+    "list_containers": list_containers,
     "tail_log": tail_log,
     "search_log": search_log,
     "tail_nginx_access": tail_nginx_access,
