@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def load_dotenv(path: str | Path = ".env") -> None:
-    """현재 디렉토리의 .env 파일을 읽어 os.environ에 주입 (이미 설정된 값은 덮어쓰지 않음)."""
+    """Inject .env from current directory into os.environ (if not already set)."""
     dotenv = Path(path)
     if not dotenv.is_file():
         return
@@ -45,14 +45,15 @@ class Settings:
     model: str
     log_file: str
     thresholds: Thresholds
-    platform: str  # "linux" | "darwin" — MONIX_PLATFORM으로 override 가능
+    platform: str  # "linux" | "darwin" — can be overridden by MONIX_PLATFORM
 
     @classmethod
     def from_env(cls) -> "Settings":
         import platform as _platform
+        from monix.config.keystore import load_api_key
         return cls(
-            gemini_api_key=os.getenv("GEMINI_API_KEY"),
-            model=os.getenv("MONIX_MODEL", "gemini-1.5-flash"),
+            gemini_api_key=os.getenv("GEMINI_API_KEY") or load_api_key(),
+            model=os.getenv("MONIX_MODEL", "gemini-2.5-flash"),
             log_file=default_log_file(),
             thresholds=Thresholds.from_env(),
             platform=_resolve_platform(os.getenv("MONIX_PLATFORM", _platform.system())),

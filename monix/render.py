@@ -9,19 +9,31 @@ from monix import __version__
 from monix.tools.system import human_bytes
 
 _LOG_ERROR_RE = re.compile(r"\b(ERROR|FATAL|CRITICAL|Exception|Traceback)\b", re.IGNORECASE)
-_LOG_WARN_RE = re.compile(r"\b(WARN|WARNING)\b", re.IGNORECASE)
+_LOG_WARN_RE  = re.compile(r"\b(WARN(?:ING)?)\b", re.IGNORECASE)
+
+# syslog: "Apr 26 14:38:29 hostname process[pid]: message"
+_SYSLOG_RE = re.compile(
+    r"^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+(\S+?)(\[\d+\])?:\s*(.*)"
+)
+# ISO timestamp: "2024-01-15 10:23:45[.fff][Z/±HH:MM] ..."
+_ISO_TS_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s+(.*)"
+)
+# [INFO] / [DEBUG] / [TRACE] / [NOTICE] bracket level tags
+_BRACKET_INFO_RE = re.compile(r"\[(?:INFO|NOTICE|DEBUG|TRACE)\]", re.IGNORECASE)
 
 _MASCOT = [
     r"        ███        ",
     r"      ███████      ",
     r"     █████████     ",
-    r"     ██ [ ] ██     ",
+    r"      █     █     ",
+    r"      █     █     ",
     r"    ███████████    ",
     r"   █████████████   ",
     r"  ███████████████  ",
-    r"  ████   █   ████  ",
-    r"  ███████████████  ",
-    r"   █████████████   ",
+    r"  ████  ███  ████  ",
+    r"   █████████████  ",
+    r"    ███████████   ",
 ]
 
 
@@ -49,7 +61,7 @@ def render_welcome(snapshot: dict, gemini_enabled: bool) -> str:
         _line("Load", _load(snapshot.get("load_average")), inner),
         _line("Status", alert_text, inner),
         _rule(width, "mid"),
-        _text(f"{style('Ask me anything!', 'bold')}  CPU 상태 봐줘    nginx 왜 느려?    Memory analysis", inner),
+        _text(f"{style('Ask me anything!', 'bold')}  Check CPU    Why is nginx slow?    Memory analysis", inner),
         _text(f"{style('/help', 'cyan')} Commands   {style('/clear', 'cyan')} Clear history   {style('/watch 5', 'cyan')} Real-time   {style('/exit', 'cyan')} Exit", inner),
         _rule(width, "bottom"),
     ]
@@ -171,9 +183,9 @@ def render_swap(swap: dict) -> str:
         return "\n".join([
             _rule(width, "top"),
             _text(style("Swap", "bold"), inner),
-            _rule(width, "mid"),
-            _text("스왑 없음 (disabled)", inner),
-            _rule(width, "bottom"),
+            _rule(width),
+            _text("No swap (disabled)", inner),
+            _rule(width),
         ])
     return "\n".join([
         _rule(width, "top"),
@@ -341,162 +353,342 @@ def render_history(records: list[dict], metric: str | None, period_label: str = 
 
 
 def render_processes(processes: list[dict]) -> str:
-    return "\n".join([style("PID      CPU%   MEM%   COMMAND", "bold"), *_process_lines(processes)])
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    lines = [
+        _rule(width, "top"),
+        _text(style("Top Processes", "bold"), inner),
+        _rule(width, "mid"),
+        _text(
+            f"{style('PID', 'muted'):<18} {style('CPU%', 'muted'):>9} {style('MEM%', 'muted'):>9}  {style('COMMAND', 'muted')}",
+            inner,
+        ),
+    ]
+    for proc in (processes or []):
+        cpu_color = "bold_red" if proc["cpu"] >= 50 else "yellow" if proc["cpu"] >= 20 else "green"
+        mem_color = "bold_red" if proc["mem"] >= 30 else "yellow" if proc["mem"] >= 10 else "green"
+        pid_str  = style(f"{proc['pid']:<8}", "muted")
+        cpu_str  = style(f"{proc['cpu']:>5.1f}", cpu_color)
+        mem_str  = style(f"{proc['mem']:>5.1f}", mem_color)
+        cmd_str  = style(proc["command"], "cyan")
+        lines.append(_text(f"{pid_str}  {cpu_str}  {mem_str}  {cmd_str}", inner))
+    if not processes:
+        lines.append(_text(style("no process data", "muted"), inner))
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
 
 
 def render_logs(result: dict) -> str:
-    status_color = "green" if result["status"] == "ok" else "red"
-    header = f"Log: {result['path']} {badge(result['status'], status_color)}"
-    if result["status"] != "ok":
-        return header
-    return "\n".join([header, *(colorize_log_line(line) for line in result["lines"])])
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    path   = result.get("path") or "unknown"
+    status = result["status"]
+    sc     = "green" if status == "ok" else "red"
+    title  = f"{style(path, 'bold_cyan')}  {badge(status, sc)}"
+    lines  = [_rule(width, "top"), _text(title, inner), _rule(width, "mid")]
+    if status != "ok":
+        lines.append(_text(style(f"읽기 실패: {status}", "red"), inner))
+    else:
+        log_lines = result.get("lines") or []
+        if not log_lines:
+            lines.append(_text(style("(빈 파일)", "muted"), inner))
+        for ln in log_lines:
+            lines.append(_text(colorize_log_line(ln), inner))
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
 
 
 def render_log_list(entries: list) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    _TC = {"app": "green", "nginx": "yellow", "docker": "cyan"}
     if not entries:
-        return "No logs registered. / 등록된 로그가 없습니다.\n  Register with: /log add @alias -app /path/to/file"
-    rows = [style(f"{'ALIAS':<22} {'TYPE':<8} PATH / CONTAINER", "bold")]
+        return "\n".join([
+            _rule(width, "top"),
+            _text(style("Logs", "bold"), inner),
+            _rule(width, "mid"),
+            _text(style("등록된 로그가 없습니다.", "muted"), inner),
+            _text(style("/log add @alias -app /path/to/file 로 등록하세요.", "muted"), inner),
+            _rule(width, "bottom"),
+        ])
+    rows = [
+        _rule(width, "top"),
+        _text(f"{style('Logs', 'bold')}  {badge(str(len(entries)) + '개', 'cyan')}", inner),
+        _rule(width, "mid"),
+    ]
     for e in entries:
-        target = e.path or e.container or "(none)"
-        rows.append(f"@{e.alias:<21} {e.type:<8} {target}")
+        target = e.path or e.container or "(없음)"
+        tc = _TC.get(e.type, "muted")
+        rows.append(_text(
+            f"{style(f'@{e.alias:<20}', 'cyan')} {badge(f'{e.type:<6}', tc)}  {style(target, 'muted')}",
+            inner,
+        ))
+    rows.append(_rule(width, "bottom"))
     return "\n".join(rows)
 
 
 def render_log_aliases(alias_list: list[str]) -> str:
     if not alias_list:
-        return "No logs registered. Register with /log add."
-    return "\n".join(["Registered log aliases:", *(f"  @{a}" for a in alias_list)])
+        return "등록된 로그가 없습니다. /log add 로 등록하세요."
+    return "\n".join([
+        style("등록된 로그 aliases:", "bold"),
+        *(f"  {style('@' + a, 'cyan')}" for a in alias_list),
+    ])
 
 
 def colorize_log_line(line: str) -> str:
+    # ── ERROR/FATAL: 줄 전체 red + 키워드 bold ───────────────────────
     if _LOG_ERROR_RE.search(line):
-        return style(line, "red")
+        hl = _LOG_ERROR_RE.sub(lambda m: f"\033[1m{m.group()}\033[0;31m", line)
+        return f"\033[31m{hl}\033[0m"
+    # ── WARN: 줄 전체 yellow + 키워드 bold ──────────────────────────
     if _LOG_WARN_RE.search(line):
-        return style(line, "yellow")
+        hl = _LOG_WARN_RE.sub(lambda m: f"\033[1m{m.group()}\033[0;33m", line)
+        return f"\033[33m{hl}\033[0m"
+    # ── syslog: "Apr 26 14:38:29 hostname process[pid]: message" ────
+    m = _SYSLOG_RE.match(line)
+    if m:
+        ts, host, proc, pid, msg = m.groups()
+        msg = _BRACKET_INFO_RE.sub(lambda x: style(x.group(), "cyan"), msg)
+        return (
+            style(ts, "muted") + " "
+            + style(host, "muted") + " "
+            + style(proc, "cyan")
+            + style(pid or "", "muted") + ": "
+            + msg
+        )
+    # ── ISO timestamp: "2024-01-15 10:23:45 …" ──────────────────────
+    m = _ISO_TS_RE.match(line)
+    if m:
+        ts, rest = m.groups()
+        rest = _BRACKET_INFO_RE.sub(lambda x: style(x.group(), "cyan"), rest)
+        return style(ts, "muted") + " " + rest
     return line
 
 
 def render_log_search(result: dict) -> str:
-    path = result["path"]
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    path   = result["path"]
     status = result["status"]
 
     if status != "ok":
-        return f"Log Search: {path} {badge(status, 'red')}"
+        return "\n".join([
+            _rule(width, "top"),
+            _text(f"{style(path, 'bold_cyan')}  {badge(status, 'red')}", inner),
+            _rule(width, "bottom"),
+        ])
 
-    query = result.get("query")
-    total = result.get("total_scanned", 0)
+    query        = result.get("query")
+    total        = result.get("total_scanned", 0)
     matches: list[dict] = result.get("matches", [])
 
-    query_label = f'Pattern "{query}"' if query else "에러/경고"
+    query_label = f'Pattern "{query}"' if query else "Error/Warn"
     error_count = sum(1 for m in matches if m["severity"] == "error")
     warn_count = sum(1 for m in matches if m["severity"] == "warn")
     found_color = "red" if error_count else "yellow" if warn_count else "green"
     found_text = f"{len(matches)} found" if matches else "Healthy"
+    error_count  = sum(1 for m in matches if m["severity"] == "error")
+    warn_count   = sum(1 for m in matches if m["severity"] == "warn")
+    found_color  = "red" if error_count else "yellow" if warn_count else "green"
+    found_text   = f"{len(matches)} found" if matches else "healthy"
+    query_label  = f'"{query}"' if query else "에러/경고"
 
+    summary = (
+        f"{style(query_label, 'bold_cyan')} — "
+        f"{style(f'{total:,} lines scanned', 'muted')}  "
+        f"{badge(found_text, found_color)}"
+    )
     lines = [
-        f"Log: {path}",
-        f"{style(query_label, 'cyan')} Search — scanned {total:,} lines  {badge(found_text, found_color)}",
+        _rule(width, "top"),
+        _text(style(path, "bold_cyan"), inner),
+        _text(summary, inner),
+        _rule(width, "mid"),
     ]
 
     if not matches:
-        return "\n".join(lines)
+        lines.append(_text(style("이상 없음", "green"), inner))
+    else:
+        for m in matches:
+            sev_color = "bold_red" if m["severity"] == "error" else "bold_yellow"
+            lineno = style(f"L{m['lineno']:>6}", "muted")
+            sev    = style(f"{'ERR' if m['severity'] == 'error' else 'WRN':>3}", sev_color)
+            lines.append(_text(f"{lineno}  {sev}  {colorize_log_line(m['line'])}", inner))
+        lines += [
+            _rule(width, "mid"),
+            _text(
+                f"  {style('ERROR', 'bold_red')} {style(str(error_count), 'red')}   "
+                f"{style('WARN', 'bold_yellow')} {style(str(warn_count), 'yellow')}",
+                inner,
+            ),
+        ]
 
-    lines.append("")
-    for m in matches:
-        color = "red" if m["severity"] == "error" else "yellow"
-        lineno_str = f"L{m['lineno']:>5}"
-        lines.append(f"  {style(lineno_str, 'muted')}  {style(m['line'], color)}")
-
-    lines += [
-        "",
-        f"  Error {style(str(error_count), 'red' if error_count else 'green')}  "
-        f"Warn {style(str(warn_count), 'yellow' if warn_count else 'green')}",
-    ]
+    lines.append(_rule(width, "bottom"))
     return "\n".join(lines)
 
 
 def render_nginx_summary(result: dict) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+
     if result["status"] != "ok":
         return render_logs(result)
 
     summary = result.get("summary") or {}
-    header = f"Log: {result['path']} {badge('ok', 'green')}"
-
+    path  = result["path"]
     total = summary.get("total", 0)
+
     if total == 0:
-        return "\n".join([header, "", "No parsed lines. / 파싱된 라인이 없습니다."])
+        return "\n".join([header, "", "No parsed lines."])
+        return "\n".join([
+            _rule(width, "top"),
+            _text(f"{style(path, 'bold_cyan')}  {badge('ok', 'green')}", inner),
+            _rule(width, "mid"),
+            _text(style("파싱된 라인 없음", "muted"), inner),
+            _rule(width, "bottom"),
+        ])
 
     lines = [
-        header,
-        "",
-        f"{style('Nginx Access Log Summary', 'bold')} — total {total:,}",
-        "",
-        style("Status Codes:", "cyan"),
+        _rule(width, "top"),
+        _text(
+            f"{style('Nginx Access Log', 'bold')}  {style(path, 'muted')}  {badge('ok', 'green')}",
+            inner,
+        ),
+        _text(f"{style('Total', 'cyan')}  {style(f'{total:,} requests', 'muted')}", inner),
+        _rule(width, "mid"),
+        _text(style("Status Codes", "bold_cyan"), inner),
     ]
 
     status_dist: dict = summary.get("status_dist", {})
     for code in sorted(status_dist):
         count = status_dist[code]
-        pct = count / total * 100
-        color = "green" if code < 400 else "yellow" if code < 500 else "red"
-        lines.append(f"  {style(str(code), color)}   {count:>6,}  ({pct:.1f}%)")
+        pct   = count / total * 100
+        bw    = 16
+        filled = max(0, min(bw, round(pct / 100 * bw)))
+        color  = "green" if code < 400 else "yellow" if code < 500 else "red"
+        bar    = style("█" * filled, color) + style("░" * (bw - filled), "muted")
+        lines.append(_text(
+            f"  {style(str(code), color)}  {bar}  {count:>6,}  {style(f'{pct:.1f}%', 'muted')}",
+            inner,
+        ))
 
     top_paths: list = summary.get("top_paths", [])
     if top_paths:
-        lines += ["", style("Top Paths (Top 10):", "cyan")]
-        for path, count in top_paths:
-            lines.append(f"  {path:<40} {count:>6,}")
+        lines += [_rule(width, "mid"), _text(style("Top Paths", "bold_cyan"), inner)]
+        for p, count in top_paths:
+            pct = count / total * 100
+            lines.append(_text(
+                f"  {style(f'{count:>6,}', 'cyan')}  {style(f'{pct:4.1f}%', 'muted')}  {p}",
+                inner,
+            ))
 
     top_ips: list = summary.get("top_ips", [])
     if top_ips:
-        lines += ["", style("Top IPs (Top 10):", "cyan")]
+        lines += [_rule(width, "mid"), _text(style("Top IPs", "bold_cyan"), inner)]
         for ip, count in top_ips:
-            lines.append(f"  {ip:<30} {count:>6,}")
+            pct = count / total * 100
+            lines.append(_text(
+                f"  {style(f'{count:>6,}', 'cyan')}  {style(f'{pct:4.1f}%', 'muted')}  {ip}",
+                inner,
+            ))
 
     error_count = len(summary.get("error_lines", []))
-    lines += ["", f"Errors (4xx/5xx): {style(str(error_count), 'red' if error_count else 'green')}"]
-
+    err_color   = "bold_red" if error_count else "green"
+    lines += [
+        _rule(width, "mid"),
+        _text(f"  {style('4xx/5xx Errors', 'cyan')}  {style(str(error_count), err_color)}", inner),
+        _rule(width, "bottom"),
+    ]
     return "\n".join(lines)
 
 
 def render_docker_containers(containers: list) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
     if not containers:
-        return "No running containers found. / 실행 중인 컨테이너가 없습니다."
-
-    rows = [
-        style(f"  {'NAME':<22} {'STATUS':<22} IMAGE", "bold"),
+        return "\n".join([
+            _rule(width, "top"),
+            _text(style("Docker Containers", "bold"), inner),
+            _rule(width, "mid"),
+            _text(style("실행 중인 컨테이너 없음", "muted"), inner),
+            _rule(width, "bottom"),
+        ])
+    lines = [
+        _rule(width, "top"),
+        _text(
+            f"{style('Docker Containers', 'bold')}  {badge(str(len(containers)) + '개 실행 중', 'green')}",
+            inner,
+        ),
+        _rule(width, "mid"),
     ]
     for c in containers:
-        rows.append(f"  {c['name']:<22} {c['status']:<22} {c['image']}")
-
-    hints = ["", style("Registration Commands:", "cyan")]
-    for c in containers:
-        name = c["name"]
-        hints.append(f"  /docker add @{name:<16} {name}")
-
-    return "\n".join(["Running Docker Containers", "", *rows, *hints])
+        sl = (c["status"] or "").lower()
+        sc = "green" if ("up" in sl or "running" in sl) else "red" if ("exit" in sl or "dead" in sl or "stop" in sl) else "yellow"
+        name_col   = style(f"{c['name']:<22}", "cyan")
+        status_col = style(f"{c['status']:<22}", sc)
+        image_col  = style(c["image"], "muted")
+        lines.append(_text(f"{name_col} {status_col} {image_col}", inner))
+    lines += [
+        _rule(width, "mid"),
+        _text(style("/docker add @alias <name>  로 alias 등록", "muted"), inner),
+        _rule(width, "bottom"),
+    ]
+    return "\n".join(lines)
 
 
 def render_docker_aliases(entries: list) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
     docker_entries = [e for e in entries if e.type == "docker"]
     if not docker_entries:
-        return (
-            "등록된 Docker 컨테이너가 없습니다.\n"
-            "  /docker add @alias <container> 로 등록하세요.\n"
-            "  실행 중인 컨테이너 목록: /docker ps"
-        )
-    rows = [style(f"  {'ALIAS':<22} CONTAINER", "bold")]
+        return "\n".join([
+            _rule(width, "top"),
+            _text(style("Docker Aliases", "bold"), inner),
+            _rule(width, "mid"),
+            _text(style("등록된 Docker 컨테이너가 없습니다.", "muted"), inner),
+            _text(style("/docker add @alias <container>", "muted"), inner),
+            _rule(width, "bottom"),
+        ])
+    lines = [
+        _rule(width, "top"),
+        _text(f"{style('Docker Aliases', 'bold')}  {badge(str(len(docker_entries)) + '개', 'cyan')}", inner),
+        _rule(width, "mid"),
+    ]
     for e in docker_entries:
-        rows.append(f"  @{e.alias:<21} {e.container or '(none)'}")
-    hints = ["", style("Commands:", "cyan")]
-    for e in docker_entries:
-        hints.append(f"  /docker @{e.alias:<18} 로그 보기  |  --live  |  --search")
-    return "\n".join(["Registered Docker Aliases", "", *rows, *hints])
+        lines.append(_text(
+            f"{style(f'@{e.alias:<20}', 'cyan')} {style(e.container or '(없음)', 'muted')}",
+            inner,
+        ))
+    lines += [
+        _rule(width, "mid"),
+        _text(style("/docker @alias  |  --live  |  --search", "muted"), inner),
+        _rule(width, "bottom"),
+    ]
+    return "\n".join(lines)
 
 
 def render_service(result: dict) -> str:
-    status_color = "green" if result["status"] == "ok" else "yellow" if result["status"] == "unknown" else "red"
-    return f"Service: {result['name']} {badge(result['status'], status_color)}\n{result['details']}"
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    sc = "green" if result["status"] == "ok" else "yellow" if result["status"] == "unknown" else "red"
+    lines = [
+        _rule(width, "top"),
+        _text(f"{style(result['name'], 'bold_cyan')}  {badge(result['status'], sc)}", inner),
+        _rule(width, "mid"),
+    ]
+    for ln in (result.get("details") or "").splitlines():
+        stripped = ln.strip()
+        if "active (running)" in stripped.lower():
+            ln_col = style(ln, "green")
+        elif any(w in stripped.lower() for w in ("inactive", "failed", "dead", "error")):
+            ln_col = style(ln, "red")
+        elif stripped.startswith("●") or stripped.startswith("*"):
+            ln_col = style(ln, "bold_cyan")
+        else:
+            ln_col = style(ln, "muted") if stripped.startswith(("Loaded:", "Active:", "Docs:", "Process:", "Main PID:", "Tasks:", "Memory:", "CPU:", "CGroup:")) else ln
+        lines.append(_text(ln_col, inner))
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
 
 
 def render_tool_start(name: str) -> str:
@@ -546,9 +738,9 @@ def prompt() -> str:
 
 def colorize_line(line: str) -> str:
     stripped = line.strip()
-    if stripped.startswith(("Alerts:", "주의:", "오류:")):
+    if stripped.startswith(("Alerts:", "Warning:", "Error:")):
         return style(line, "red")
-    if stripped.startswith(("CPU", "Memory", "메모리", "Disk", "디스크", "Load")):
+    if stripped.startswith(("CPU", "Memory", "Disk", "Load")):
         return style(line, "cyan")
     if stripped.startswith(("-", "  -")):
         return style(line, "muted")
@@ -570,6 +762,11 @@ def style(value: str, color: str) -> str:
         "yellow": "33",
         "cyan": "36",
         "magenta": "35",
+        "bold_red": "1;31",
+        "bold_yellow": "1;33",
+        "bold_green": "1;32",
+        "bold_cyan": "1;36",
+        "bold_magenta": "1;35",
     }
     code = codes.get(color)
     if not code:

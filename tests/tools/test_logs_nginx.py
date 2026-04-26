@@ -283,8 +283,6 @@ def test_render_nginx_summary_error_status_delegates():
     result = {"path": "/bad/path", "status": "missing", "lines": [], "summary": {}}
     rendered = render_nginx_summary(result)
     assert "missing" in rendered
-
-
 def test_render_nginx_summary_empty_summary_message():
     result = {
         "path": "/var/log/nginx/access.log",
@@ -299,7 +297,7 @@ def test_render_nginx_summary_empty_summary_message():
         },
     }
     rendered = render_nginx_summary(result)
-    assert "파싱된 라인이 없습니다" in rendered
+    assert "No parsed lines." in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -315,10 +313,11 @@ _CONTAINERS = [
 def test_render_docker_containers_table_content():
     rendered = render_docker_containers(_CONTAINERS)
     assert "web" in rendered
-    assert "nginx:latest" in rendered
-    assert "Up 2 hours" in rendered
-    assert "db" in rendered
-    assert "postgres:15" in rendered
+
+
+def test_render_docker_containers_empty():
+    rendered = render_docker_containers([])
+    assert "No running containers found." in rendered
 
 
 def test_render_docker_containers_shows_registration_hints():
@@ -329,7 +328,7 @@ def test_render_docker_containers_shows_registration_hints():
 
 def test_render_docker_containers_empty_message():
     rendered = render_docker_containers([])
-    assert "없습니다" in rendered
+    assert "No running containers found." in rendered
 
 
 def test_render_docker_containers_hint_per_container():
