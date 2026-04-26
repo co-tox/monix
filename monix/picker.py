@@ -129,7 +129,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         return w
 
     def _items() -> list[tuple[str, str]]:
-        query = "".join(query_buf)
+        query = "".join(query_buf).lstrip("/")
         if not query:
             return list(COMMANDS)
 
@@ -154,7 +154,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
 
     def _filter_inline() -> str:
         """The /query string shown after prompt (with ANSI)."""
-        query = "".join(query_buf)
+        query = "".join(query_buf).lstrip("/")
         if query:
             return f"\033[36m/\033[1m{query}\033[0m"
         return "\033[36m/\033[0m"
@@ -321,7 +321,7 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
                     try:
                         char = pending.decode("utf-8")
                         pending.clear()
-                        if char.isprintable() and char != "/":
+                        if char.isprintable():
                             query_buf.insert(q_cursor, char)
                             q_cursor += 1
                             idx = 0
