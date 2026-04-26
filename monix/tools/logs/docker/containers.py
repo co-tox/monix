@@ -23,14 +23,15 @@ def _pipe_ready(stream, timeout: float) -> bool:
 
 
 def tail_container(container: str, lines: int = DEFAULT_CONTAINER_TAIL) -> TailResult:
-    """Fetch the last N lines from a Docker container's log."""
-    if lines < 1:
-        raise ValueError(f"lines must be >= 1, got {lines}")
+    """Fetch the last N lines from a Docker container's log. lines=0 → all."""
+    if lines < 0:
+        raise ValueError(f"lines must be >= 0, got {lines}")
+    tail_arg = "all" if lines == 0 else str(lines)
     try:
         output = subprocess.check_output(
-            ["docker", "logs", "--tail", str(lines), container],
+            ["docker", "logs", "--tail", tail_arg, container],
             text=True,
-            timeout=10,
+            timeout=30,
             stderr=subprocess.STDOUT,
         )
         return {"path": f"docker://{container}", "status": "ok", "lines": output.splitlines()}
@@ -99,16 +100,17 @@ def list_containers() -> list[dict]:
 def search_container(
     container: str,
     pattern: str | None = None,
-    lines: int = DEFAULT_SEARCH_LINES,
+    lines: int = 0,
 ) -> SearchResult:
     """Search container logs for errors/patterns.
 
+    lines=0 (default) → entire log.
     pattern=None  → returns only error/warn lines.
     pattern=<str> → returns lines matching the pattern (case-insensitive regex).
     If pattern is an invalid regex, falls back to literal match.
     """
-    if lines < 1:
-        raise ValueError(f"lines must be >= 1, got {lines}")
+    if lines < 0:
+        raise ValueError(f"lines must be >= 0, got {lines}")
 
     tail_result = tail_container(container, lines)
     if tail_result["status"] != "ok":
