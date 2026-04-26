@@ -10,9 +10,8 @@ from monix.config import Settings
 from monix.core.assistant import answer, infer_service_name, local_answer
 from monix.picker import NO_ARG_COMMANDS, pick
 from monix.tools.logs import tail_log
-from monix.tools.processes import top_processes
 from monix.tools.services import service_status
-from monix.tools.system import collect_snapshot
+from monix.tools.system import collect_snapshot, top_processes
 from monix.render import clear_screen, prompt, render_logs, render_reply, render_processes, render_service, render_snapshot, render_welcome
 
 

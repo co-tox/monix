@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable
 
 from monix.config import Thresholds
-from monix.tools.processes import top_processes
+from monix.tools.system.processes import top_processes
 
 
 def collect_snapshot(thresholds: Thresholds | None = None) -> dict:
