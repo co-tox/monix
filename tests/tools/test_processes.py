@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from monix.tools.processes import parse_ps, top_processes
+from monix.tools.system.processes import parse_ps, top_processes
 
 
 def test_parse_ps_normal():
@@ -42,13 +42,13 @@ def test_top_processes_returns_list():
     mock_result = MagicMock()
     mock_result.returncode = 0
     mock_result.stdout = "PID PPID %CPU %MEM COMMAND\n1 0 1.0 0.5 init"
-    with patch("monix.tools.processes.subprocess.run", return_value=mock_result):
+    with patch("monix.tools.system.processes.subprocess.run", return_value=mock_result):
         result = top_processes(limit=5)
     assert isinstance(result, list)
 
 
 def test_top_processes_subprocess_failure_returns_empty():
     import subprocess
-    with patch("monix.tools.processes.subprocess.run", side_effect=OSError("fail")):
+    with patch("monix.tools.system.processes.subprocess.run", side_effect=OSError("fail")):
         result = top_processes()
     assert result == []

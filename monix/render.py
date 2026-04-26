@@ -141,6 +141,66 @@ def render_disk(disks: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def render_network(interfaces: list[dict]) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    lines = [_rule(width), _text(style("Network I/O", "bold"), inner), _rule(width)]
+    visible = [i for i in interfaces if i["rx_bps"] > 0 or i["tx_bps"] > 0 or
+               i.get("rx_bytes_total", 0) + i.get("tx_bytes_total", 0) >= 100 * 1024 * 1024]
+    if not visible:
+        visible = interfaces[:3]  # fallback: show top 3 even if idle
+    if not visible:
+        lines.append(_text("no network data", inner))
+    else:
+        for iface in visible:
+            rx = human_bytes(int(iface["rx_bps"])) + "/s"
+            tx = human_bytes(int(iface["tx_bps"])) + "/s"
+            label = iface["interface"]
+            lines.append(_line(f"{label:<12}", f"↓ {rx:<14}  ↑ {tx}", inner))
+    lines.append(_rule(width))
+    return "\n".join(lines)
+
+
+def render_swap(swap: dict) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    total = swap.get("total") or 0
+    if total == 0:
+        return "\n".join([
+            _rule(width),
+            _text(style("Swap", "bold"), inner),
+            _rule(width),
+            _text("스왑 없음 (disabled)", inner),
+            _rule(width),
+        ])
+    return "\n".join([
+        _rule(width),
+        _text(style("Swap", "bold"), inner),
+        _rule(width),
+        _metric("Swap", swap.get("percent"), inner, suffix=f"{human_bytes(swap.get('free'))} free"),
+        _line("Used", human_bytes(swap.get("used")), inner),
+        _line("Free", human_bytes(swap.get("free")), inner),
+        _line("Total", human_bytes(swap.get("total")), inner),
+        _rule(width),
+    ])
+
+
+def render_disk_io(devices: list[dict]) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    lines = [_rule(width), _text(style("Disk I/O", "bold"), inner), _rule(width)]
+    if not devices:
+        lines.append(_text("no disk I/O data", inner))
+    else:
+        for dev in devices:
+            read_s = human_bytes(int(dev["read_bps"])) + "/s"
+            write_s = human_bytes(int(dev["write_bps"])) + "/s"
+            label = dev["device"]
+            lines.append(_line(f"{label:<12}", f"R {read_s:<14}  W {write_s}", inner))
+    lines.append(_rule(width))
+    return "\n".join(lines)
+
+
 def render_processes(processes: list[dict]) -> str:
     return "\n".join([style("PID      CPU%   MEM%   COMMAND", "bold"), *_process_lines(processes)])
 

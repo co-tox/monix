@@ -18,13 +18,19 @@ from monix.render import (
     clear_screen,
     colorize_log_line,
     prompt,
+    render_cpu,
+    render_disk,
+    render_disk_io,
     render_log_aliases,
     render_log_list,
     render_logs,
+    render_memory,
+    render_network,
     render_reply,
     render_processes,
     render_service,
     render_snapshot,
+    render_swap,
     render_welcome,
     render_memory,
     render_disk,
@@ -33,7 +39,17 @@ from monix.render import (
     render_tool_fail,
     render_tool_start,
 )
-from monix.tools.system import collect_snapshot, cpu_usage_percent, disk_info, load_average, memory_info, top_processes
+from monix.tools.system import (
+    collect_snapshot,
+    cpu_usage_percent,
+    disk_info,
+    disk_io,
+    load_average,
+    memory_info,
+    network_io,
+    swap_info,
+    top_processes,
+)
 
 
 HELP = """Commands:
@@ -59,6 +75,9 @@ HELP = """Commands:
   /memory                 메모리 사용량 상세
   /disk                   디스크 사용량
   /cpu                    CPU 사용률 + Load average
+  /swap                   스왑 사용량
+  /net                    네트워크 I/O (인터페이스별 bps)
+  /io                     디스크 I/O (읽기/쓰기 속도)
 
 자연어로도 바로 물어볼 수 있어요:
   "CPU 왜 이렇게 높아?"  "nginx 서비스 확인해줘"  "메모리 언제 부족해질까?\""""
@@ -165,6 +184,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "disk":
         print(render_disk(disk_info()))
         return 0
+    if args.command == "swap":
+        print(render_swap(swap_info()))
+        return 0
+    if args.command == "net":
+        print(render_network(network_io()))
+        return 0
+    if args.command == "io":
+        print(render_disk_io(disk_io()))
+        return 0
     if args.command == "top":
         print(render_processes(top_processes(args.limit)))
         return 0
@@ -189,6 +217,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("cpu", help="show CPU usage and load average")
     subparsers.add_parser("memory", help="show memory usage")
     subparsers.add_parser("disk", help="show disk usage")
+    subparsers.add_parser("swap", help="show swap usage")
+    subparsers.add_parser("net", help="show network I/O")
+    subparsers.add_parser("io", help="show disk I/O read/write rates")
 
     top_parser = subparsers.add_parser("top", help="show top CPU processes")
     top_parser.add_argument("--limit", "-n", type=int, default=10)
@@ -263,6 +294,12 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         return render_memory(memory_info())
     if command == "/disk":
         return render_disk(disk_info())
+    if command == "/swap":
+        return render_swap(swap_info())
+    if command == "/net":
+        return render_network(network_io())
+    if command == "/io":
+        return render_disk_io(disk_io())
     if command == "/watch":
         interval = _int_arg(args, 0, 5)
         return watch(interval, settings)
