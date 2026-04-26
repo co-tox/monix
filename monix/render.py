@@ -483,16 +483,11 @@ def render_log_search(result: dict) -> str:
     total        = result.get("total_scanned", 0)
     matches: list[dict] = result.get("matches", [])
 
-    query_label = f'Pattern "{query}"' if query else "Error/Warn"
-    error_count = sum(1 for m in matches if m["severity"] == "error")
-    warn_count = sum(1 for m in matches if m["severity"] == "warn")
-    found_color = "red" if error_count else "yellow" if warn_count else "green"
-    found_text = f"{len(matches)} found" if matches else "Healthy"
+    query_label  = f'"{query}"' if query else "에러/경고"
     error_count  = sum(1 for m in matches if m["severity"] == "error")
     warn_count   = sum(1 for m in matches if m["severity"] == "warn")
     found_color  = "red" if error_count else "yellow" if warn_count else "green"
     found_text   = f"{len(matches)} found" if matches else "healthy"
-    query_label  = f'"{query}"' if query else "에러/경고"
 
     summary = (
         f"{style(query_label, 'bold_cyan')} — "
@@ -539,7 +534,6 @@ def render_nginx_summary(result: dict) -> str:
     total = summary.get("total", 0)
 
     if total == 0:
-        return "\n".join([header, "", "No parsed lines."])
         return "\n".join([
             _rule(width, "top"),
             _text(f"{style(path, 'bold_cyan')}  {badge('ok', 'green')}", inner),

@@ -70,21 +70,34 @@ from monix.tools.system import (
 )
 
 HELP = """Commands:
+  /cpu                             CPU usage + load average
+  /memory                          Memory usage
+  /disk                            Disk usage
+  /swap                            Swap usage
+  /net                             Network I/O
+  /io                              Disk I/O
+  /top [limit]                     Top processes (default 10)
+  /service <name>                  Check systemd service status
+
   /stat [cpu|memory|disk|swap|net|io]  Snapshot or history view (Type /stat for details)
   /watch [cpu|memory|disk|swap|net|io] [sec]  Real-time monitoring (Type /watch for details)
+
   /collect list                    Show collector configuration
   /collect set <interval> <retention> <folder>  Configure collector
   /collect remove                  Disable and remove collector
+
   /log add @alias -app <path>      Register app log
   /log add @alias -nginx <path>    Register Nginx log
   /log add @alias -docker <name>   Register Docker container log
   /log list                        List registered logs
+  /log @                           Show registered aliases
   /log @alias [-n lines]           View registered log
   /log @alias --search [pattern]   Search error/warn (default: error filter)
   /log @alias --live [-n lines]    Real-time log streaming
   /log /path/to/file [-n lines]    Direct path view (no registration needed)
   /log /path/to/file --live        Direct path real-time streaming
   /log remove @alias               Unregister log
+  /logs [path] [lines]             Direct log view (quick, no alias)
 
   /docker ps                       List running containers
   /docker add @alias <container>   Register container alias
@@ -94,10 +107,9 @@ HELP = """Commands:
   /docker @alias --live            Real-time streaming
   /docker remove @alias            Unregister alias
   /docker logs <container>         View container logs directly [-n lines]
-  /docker search <container>       Search error/pattern (direct) [pattern] [-n lines]
+  /docker search <container> [pattern] [-n lines]  Search error/pattern (direct)
   /docker live <container>         Real-time streaming (direct) [-n lines]
 
-  /logs [path] [lines]             Direct log view
   /ask <question>                  Ask Gemini (requires GEMINI_API_KEY)
   /clear                           Clear conversation history
   /help                            Show this help
@@ -556,16 +568,20 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
     if alias:
         bare = _is_bare_alias_input(raw, alias)
         question = _is_natural_question(raw)
-        if bare or question:
-            # Ambiguous or natural-language question — defer to LLM so it can
-            # call the right tool with full context (registry already injected).
+        tokens = {t.strip("@.,?!:;").lower() for t in raw.split()}
+        # Fast-path only when a clear error or tail keyword is present.
+        # Everything else (search verbs, free-form English/Korean, questions)
+        # goes to the LLM which can call the right tool with proper arguments.
+        has_clear_intent = bool(tokens & (_ERROR_INTENTS | _TAIL_INTENTS))
+
+        if bare or question or not has_clear_intent:
             if settings.gemini_enabled:
                 with Spinner("Asking Gemini..."):
                     return answer(raw, settings, history)
             if bare:
                 return (
-                    f"How can I help with @{alias}?\n"
-                    f"  e.g.: check errors in @{alias} / show last 50 lines of @{alias}"
+                    f"@{alias} 에 대해 무엇을 도와드릴까요?\n"
+                    f"  예: @{alias} 에러 확인 / @{alias} 마지막 50줄 보여줘"
                 )
         return _log_search_natural(alias, raw)
 
@@ -922,7 +938,7 @@ def _docker_help() -> str:
         "  /docker @alias --live [-n lines]        Real-time streaming\n"
         "  /docker remove @alias                   Unregister alias\n"
         "  /docker logs <container> [-n lines]     View container logs directly\n"
-        "  /docker search <container> [pattern]    Search error/pattern (direct)\n"
+        "  /docker search <container> [pattern] [-n lines]  Search error/pattern (direct)\n"
         "  /docker live <container> [-n lines]     Real-time streaming (direct)"
     )
 
@@ -1001,9 +1017,6 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
 
     if sub == "list":
         return render_log_list(registry.load())
-
-    if sub == "docker-list":
-        return render_docker_containers(list_containers())
 
     if sub in ("remove", "rm"):
         if len(args) < 2:
@@ -1084,7 +1097,6 @@ def _log_help() -> str:
         "  /log add @alias -nginx /path/to/file  Register Nginx log\n"
         "  /log add @alias -docker <container>   Register Docker container log\n"
         "  /log list                             List registered logs\n"
-        "  /log docker-list                      List running Docker containers\n"
         "  /log @                                Show registered aliases\n"
         "  /log @alias [-n 100]                  View registered log\n"
         "  /log @alias --search [pattern]        Search error/warn (default: error filter)\n"
@@ -1147,12 +1159,16 @@ def _get_str_opt(args: list[str], flag: str) -> str | None:
 
 # ── Natural language @alias log search ───────────────────────────────────────────
 
+# Korean words MUST stay — direct commands like "@app 에러 확인" or "@app 마지막 50줄"
+# should fast-path to local handling without a Gemini round-trip.
 _ERROR_INTENTS = frozenset({
     "error", "errors", "exception", "exceptions", "fatal", "critical", "warn", "warning",
+    "에러", "오류", "예외", "경고", "위험", "실패",
 })
 
 _TAIL_INTENTS = frozenset({
-    "tail", "last", "latest", "show", "output", "display", "line", "lines",
+    "tail", "last", "latest", "show", "output", "display", "line", "lines", "recent",
+    "마지막", "최근", "출력", "보여줘", "보여",
 })
 
 _LOG_SEARCH_INTENTS = frozenset({

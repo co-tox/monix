@@ -12,23 +12,24 @@ except ImportError:
 
 
 COMMANDS: list[tuple[str, str]] = [
-    ("/exit",           "Exit"),
-    ("/help",           "Help"),
-    ("/clear",          "Clear history"),
-    ("/ask",            "Ask Gemini  <query>"),
-    ("/service",        "Service status  <name>"),
-    ("/docker",         "Docker  ps·logs·search·live"),
-    ("/logs",           "Direct log view  [path] [lines]"),
-    ("/log",            "Log management  add·list·@alias·--live"),
-    ("/top",            "Process TOP  [count]"),
-    ("/watch",          "Real-time watch  [sec]"),
-    ("/io",             "Disk I/O  read/write speed"),
-    ("/net",            "Network I/O  per-interface bps"),
-    ("/swap",           "Swap usage"),
-    ("/disk",           "Disk usage"),
-    ("/memory",         "Detailed memory usage"),
     ("/cpu",            "CPU usage + Load average"),
-    ("/stat",           "Summary snapshot including swap·net·io"),
+    ("/memory",         "Detailed memory usage"),
+    ("/disk",           "Disk usage"),
+    ("/swap",           "Swap usage"),
+    ("/net",            "Network I/O  per-interface bps"),
+    ("/io",             "Disk I/O  read/write speed"),
+    ("/top",            "Process TOP  [count]"),
+    ("/service",        "Service status  <name>"),
+    ("/stat",           "Snapshot or history  [metric] [period]"),
+    ("/watch",          "Real-time watch  [metric] [sec]"),
+    ("/collect",        "Collector  list·set·remove"),
+    ("/log",            "Log management  add·list·@alias·--live"),
+    ("/logs",           "Direct log view  [path] [lines]"),
+    ("/docker",         "Docker  ps·logs·search·live"),
+    ("/ask",            "Ask Gemini  <query>"),
+    ("/clear",          "Clear history"),
+    ("/help",           "Help"),
+    ("/exit",           "Exit"),
 ]
 
 # Subcommand options revealed when the user types "<command> " (trailing space)
@@ -38,7 +39,6 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("add",          "@alias -app|-nginx|-docker <path>  Register log"),
         ("list",         "List registered logs"),
         ("remove",       "@alias  Unregister log"),
-        ("docker-list",  "List running Docker containers"),
     ],
     "/docker": [
         ("ps",      "List running containers"),
@@ -71,7 +71,7 @@ NO_ARG_COMMANDS = {
     "/status", "/stat", "/cpu", "/memory", "/disk", "/swap", "/net", "/io",
     "/clear", "/help", "/exit",
     # subcommands that take no further args — Enter immediately submits.
-    "/log list", "/log docker-list",
+    "/log list",
     "/docker ps", "/docker list",
 }
 

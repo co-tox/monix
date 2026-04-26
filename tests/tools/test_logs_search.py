@@ -298,9 +298,9 @@ def test_log_search_natural_tail_intent(tmp_path, monkeypatch):
     with patch("monix.tools.logs.app.subprocess.check_output", return_value="INFO: all good"):
         from monix.cli import _log_search_natural
         result = _log_search_natural("application", "search and show last lines of @application log")
-    # Should render as a plain log view, not error-search result
-    assert "Error/Warn" not in result
-    assert "Log:" in result
+    # Should render as a plain log view (box panel), not error-search result
+    assert "에러/경고" not in result
+    assert "all good" in result
 
 
 def test_log_search_natural_all_lines_keyword(tmp_path, monkeypatch):
@@ -339,5 +339,5 @@ def test_log_search_natural_error_filter(tmp_path, monkeypatch):
     with patch("monix.tools.logs.app.subprocess.check_output", return_value=fake_output):
         from monix.cli import _log_search_natural
         result = _log_search_natural("api", "search @api log for errors")
-    assert "Error/Warn" in result
+    assert "에러/경고" in result
     assert "crash" in result

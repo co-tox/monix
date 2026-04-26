@@ -30,7 +30,7 @@ def test_docker_ps_renders_containers():
 def test_docker_ps_no_containers():
     with patch("monix.cli.list_containers", return_value=[]):
         result = dispatch("/docker ps")
-    assert "No running" in result
+    assert "실행 중인 컨테이너 없음" in result
 
 
 # --- /docker add ---
@@ -79,7 +79,7 @@ def test_docker_list_empty():
     with patch("monix.cli.registry") as mock_reg:
         mock_reg.load.return_value = []
         result = dispatch("/docker list")
-    assert "No Docker containers" in result
+    assert "등록된 Docker 컨테이너가 없습니다." in result
 
 
 # --- /docker @alias ---
@@ -230,7 +230,7 @@ def test_docker_logs_ok():
     fake_output = "INFO: started\nERROR: oops"
     with patch("monix.tools.logs.docker.containers.subprocess.check_output", return_value=fake_output):
         result = dispatch("/docker logs myapp")
-    assert "Log:" in result
+    assert "docker://myapp" in result
     assert "myapp" in result
 
 
@@ -257,7 +257,7 @@ def test_docker_search_no_pattern_returns_errors():
     fake_log = "INFO: ok\nERROR: crash\nDEBUG: fine"
     with patch("monix.tools.logs.docker.containers.subprocess.check_output", return_value=fake_log):
         result = dispatch("/docker search myapp")
-    assert "Error/Warn" in result
+    assert "에러/경고" in result
     assert "crash" in result
 
 

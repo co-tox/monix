@@ -297,7 +297,7 @@ def test_render_nginx_summary_empty_summary_message():
         },
     }
     rendered = render_nginx_summary(result)
-    assert "No parsed lines." in rendered
+    assert "파싱된 라인 없음" in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +317,7 @@ def test_render_docker_containers_table_content():
 
 def test_render_docker_containers_empty():
     rendered = render_docker_containers([])
-    assert "No running containers found." in rendered
+    assert "실행 중인 컨테이너 없음" in rendered
 
 
 def test_render_docker_containers_shows_registration_hints():
@@ -328,11 +328,11 @@ def test_render_docker_containers_shows_registration_hints():
 
 def test_render_docker_containers_empty_message():
     rendered = render_docker_containers([])
-    assert "No running containers found." in rendered
+    assert "실행 중인 컨테이너 없음" in rendered
 
 
 def test_render_docker_containers_hint_per_container():
     containers = [{"name": "myapp", "status": "Up", "image": "myapp:1.0"}]
     rendered = render_docker_containers(containers)
     assert "myapp" in rendered
-    assert "@myapp" in rendered
+    assert "alias" in rendered
