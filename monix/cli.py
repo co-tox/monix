@@ -301,9 +301,9 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
     if command == "/help":
         return HELP
     if command == "/clear":
-        if history is not None:
-            history.clear()
-        return "Cleared history. / 대화 기록을 초기화했습니다."
+        snap = collect_snapshot(settings)
+        print(clear_screen() + render_welcome(snap, settings.gemini_enabled))
+        return ""
     if command == "/status":
         snap = _run_with_indicator("snapshot", collect_snapshot, settings)
         return render_snapshot(snap)
@@ -331,7 +331,16 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
     if command == "/log":
         return _dispatch_log(args, settings)
     if command == "/logs":
-        path = args[0] if args else settings.log_file
+        if not args:
+            return (
+                "사용법: /logs <경로> [줄수]\n"
+                "예시: /logs /var/log/syslog 100\n\n"
+                "alias 등록/관리는 /log 명령어를 사용하세요:\n"
+                "  /log add @alias -app <경로>   로그 등록\n"
+                "  /log @alias [-n 줄수]         등록된 로그 보기\n"
+                "  /log list                     등록된 목록 확인"
+            )
+        path = args[0]
         lines = _int_arg(args, 1, 80)
         log = _run_with_indicator("tail_log", tail_log, path, lines)
         return render_logs(log)
