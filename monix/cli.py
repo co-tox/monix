@@ -33,6 +33,9 @@ from monix.render import (
     prompt,
     render_docker_aliases,
     render_docker_containers,
+    render_docker_inspect,
+    render_docker_stats,
+    render_docker_top,
     render_cpu,
     render_disk,
     render_disk_io,
@@ -58,6 +61,9 @@ from monix.render import (
 )
 from monix.tools.system import (
     collect_snapshot,
+    container_inspect,
+    container_processes,
+    container_stats,
     cpu_usage_percent,
     disk_info,
     disk_io,
@@ -100,6 +106,9 @@ HELP = """Commands:
   /logs [path] [lines]             Direct log view (quick, no alias)
 
   /docker ps                       List running containers
+  /docker stats [container]        Resource usage (CPU/mem/net/io)
+  /docker top <container>          Processes inside a container
+  /docker inspect <container>      Ports, mounts, env, health
   /docker add @alias <container>   Register container alias
   /docker list                     List registered Docker aliases
   /docker @alias [-n lines]        View registered container logs
@@ -875,6 +884,34 @@ def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG00
             return err
         return _docker_live(container, _get_opt(args, "-n", 20))
 
+    if sub == "stats":
+        target = args[1] if len(args) > 1 else None
+        if target:
+            resolved, err = _resolve_docker_container(target)
+            if err:
+                return err
+            target = resolved
+        stats = _run_with_indicator("docker_stats", container_stats, target)
+        return render_docker_stats(stats)
+
+    if sub == "top":
+        if len(args) < 2:
+            return "Usage: /docker top <container|@alias>"
+        container, err = _resolve_docker_container(args[1])
+        if err:
+            return err
+        result = _run_with_indicator("docker_top", container_processes, container)
+        return render_docker_top(result)
+
+    if sub == "inspect":
+        if len(args) < 2:
+            return "Usage: /docker inspect <container|@alias>"
+        container, err = _resolve_docker_container(args[1])
+        if err:
+            return err
+        info = _run_with_indicator("docker_inspect", container_inspect, container)
+        return render_docker_inspect(info)
+
     return _docker_help()
 
 
@@ -926,6 +963,9 @@ def _docker_help() -> str:
     return (
         "Docker commands:\n"
         "  /docker ps                              List running containers\n"
+        "  /docker stats [container]               Resource usage (CPU/mem/net/io)\n"
+        "  /docker top <container>                 Processes inside a container\n"
+        "  /docker inspect <container>             Ports, mounts, env, health\n"
         "  /docker add @alias <container>          Register container alias\n"
         "  /docker list                            List registered Docker aliases\n"
         "  /docker @alias [-n lines]               View registered container logs\n"

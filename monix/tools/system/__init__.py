@@ -1,6 +1,7 @@
 from monix.tools.system.cpu import cpu_usage_percent
 from monix.tools.system.disk import disk_info
 from monix.tools.system.disk_io import disk_io
+from monix.tools.system.docker_stats import container_inspect, container_processes, container_stats
 from monix.tools.system.memory import memory_info
 from monix.tools.system.metrics import (
     build_alerts,
@@ -17,6 +18,9 @@ from monix.tools.system.swap import swap_info
 __all__ = [
     "build_alerts",
     "collect_snapshot",
+    "container_inspect",
+    "container_processes",
+    "container_stats",
     "cpu_usage_percent",
     "disk_info",
     "disk_io",
