@@ -142,23 +142,29 @@ _HISTORY: list[str] = []
 
 _collector_stop: threading.Event = threading.Event()
 _collector_thread: threading.Thread | None = None
+_collector_last_error: str | None = None
+_collector_last_saved: str | None = None
 
 
 def _start_collector(cfg: CollectorConfig) -> None:
-    global _collector_thread, _collector_stop
+    global _collector_thread, _collector_stop, _collector_last_error, _collector_last_saved
     _collector_stop.set()
     _collector_stop = threading.Event()
     stop = _collector_stop
+
     interval_sec = cfg.interval_days * 86400
 
     def _run() -> None:
+        global _collector_last_error, _collector_last_saved
         while True:
             try:
-                collect_and_save(cfg.folder)
+                path = collect_and_save(cfg.folder)
                 if cfg.retention_days > 0:
                     prune_metrics_file(cfg.folder, cfg.retention_days)
-            except Exception:
-                pass
+                _collector_last_saved = path
+                _collector_last_error = None
+            except Exception as exc:
+                _collector_last_error = str(exc) or type(exc).__name__
             if stop.wait(interval_sec):
                 break
 
@@ -1419,12 +1425,17 @@ def _dispatch_collect(args: list[str]) -> str:
             return "Collector is not configured. Use /collect set to configure."
         active = _collector_thread is not None and _collector_thread.is_alive()
         status = "Active" if active else "Stopped"
-        return (
-            f"Collector configuration [{status}]\n"
-            f"  Interval:   {_fmt_duration(cfg.interval_days)}\n"
-            f"  Retention:  {_fmt_duration(cfg.retention_days)}\n"
-            f"  Storage:    {cfg.folder}"
-        )
+        lines = [
+            f"Collector configuration [{status}]",
+            f"  Interval:   {_fmt_duration(cfg.interval_days)}",
+            f"  Retention:  {_fmt_duration(cfg.retention_days)}",
+            f"  Storage:    {cfg.folder}",
+        ]
+        if _collector_last_saved:
+            lines.append(f"  Last saved: {_collector_last_saved}")
+        if _collector_last_error:
+            lines.append(f"  Last error: {_collector_last_error}")
+        return "\n".join(lines)
 
     if sub == "set":
         rest = args[1:]
