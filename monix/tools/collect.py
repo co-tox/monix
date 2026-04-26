@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 CONFIG_PATH = Path.home() / ".monix" / "collector.json"
+METRICS_FILENAME = "metrics.jsonl"
 
 
 @dataclasses.dataclass
@@ -41,7 +42,7 @@ def save_config(cfg: CollectorConfig) -> None:
 
 
 def collect_and_save(folder: str) -> str:
-    """메트릭을 수집해 JSON 파일로 저장. 저장된 파일 경로를 반환."""
+    """메트릭을 수집해 JSONL 파일에 append. 저장된 파일 경로를 반환."""
     from monix.tools.system import (
         cpu_usage_percent,
         disk_info,
@@ -85,36 +86,72 @@ def collect_and_save(folder: str) -> str:
 
     out_dir = Path(folder)
     out_dir.mkdir(parents=True, exist_ok=True)
-    filename = datetime.now().strftime("monix_%Y-%m-%d_%H-%M-%S.json")
-    out_path = out_dir / filename
-    out_path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    out_path = metrics_path(folder)
+    with out_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str))
+        f.write("\n")
     return str(out_path)
 
 
 def load_history(folder: str, start: datetime, end: datetime) -> list[dict]:
-    """주어진 기간의 수집 파일을 시간순으로 로드."""
+    """주어진 기간의 JSONL 수집 이력을 시간순으로 로드."""
     result = []
-    for f in sorted(Path(folder).glob("monix_*.json")):
-        try:
-            ts = datetime.strptime(f.stem[len("monix_"):], "%Y-%m-%d_%H-%M-%S")
-            if start <= ts <= end:
-                data = json.loads(f.read_text(encoding="utf-8"))
-                data["_ts"] = ts
-                result.append(data)
-        except Exception:
-            pass
+    for data, ts in _iter_metric_records(metrics_path(folder)):
+        if start <= ts <= end:
+            data["_ts"] = ts
+            result.append(data)
+    result.sort(key=lambda item: item["_ts"])
     return result
 
 
-def purge_old_files(folder: str, retention_days: float) -> int:
-    """보존 기간이 지난 파일 삭제. 삭제된 파일 수를 반환."""
+def prune_metrics_file(folder: str, retention_days: float) -> int:
+    """보존 기간이 지난 JSONL 샘플을 제거. 제거된 샘플 수를 반환."""
+    path = metrics_path(folder)
+    if not path.exists():
+        return 0
     cutoff = datetime.now() - timedelta(days=retention_days)
     removed = 0
-    for f in Path(folder).glob("monix_*.json"):
-        try:
-            if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
-                f.unlink()
-                removed += 1
-        except OSError:
-            pass
+    kept: list[dict] = []
+    for data, ts in _iter_metric_records(path):
+        if ts < cutoff:
+            removed += 1
+        else:
+            kept.append(data)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as f:
+        for data in kept:
+            data.pop("_ts", None)
+            f.write(json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str))
+            f.write("\n")
+    tmp_path.replace(path)
     return removed
+
+
+def metrics_path(folder: str) -> Path:
+    return Path(folder) / METRICS_FILENAME
+
+
+def _iter_metric_records(path: Path):
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+            ts = _record_timestamp(data)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        yield data, ts
+
+
+def _record_timestamp(data: dict) -> datetime:
+    raw = str(data.get("timestamp") or "")
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    ts = datetime.fromisoformat(raw)
+    if ts.tzinfo is not None:
+        ts = ts.astimezone().replace(tzinfo=None)
+    return ts
