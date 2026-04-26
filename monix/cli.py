@@ -458,7 +458,11 @@ def repl(settings: Settings | None = None) -> int:
         except Exception as exc:
             output = f"Error: {exc}"
         if output:
-            if _is_panel_output(output):
+            cmd0 = raw.split()[0] if raw else ""
+            if cmd0 == "/clear":
+                print(clear_screen(), end="")
+                print(render_welcome(collect_snapshot(settings), settings.gemini_enabled))
+            elif _is_panel_output(output):
                 print("\n" + output)
             else:
                 print(render_reply(output))
