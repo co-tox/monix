@@ -24,7 +24,7 @@ from monix.tools.collect import (
 from monix.picker import NO_ARG_COMMANDS, pick, pick_with_filter
 from monix.tools.logs import follow_log, registry, search_log, tail_log
 from monix.tools.logs.docker import follow_container, list_containers, search_container, tail_container
-from monix.tools.services import service_status
+from monix.tools.services import list_services, service_status
 from monix.tools.logs.nginx import tail_nginx_access
 from monix.render import (
     badge,
@@ -51,6 +51,7 @@ from monix.render import (
     render_processes,
     render_top,
     render_service,
+    render_service_list,
     render_snapshot,
     render_stat,
     render_swap,
@@ -86,6 +87,7 @@ HELP = """Commands:
   /io                              Disk I/O
   /top [cpu|memory|disk|all] [N]   Top processes
   /top help                        Show /top usage details
+  /service all                     List all running services
   /service <name>                  Check systemd service status
 
   /stat [all|cpu|mem|disk|swap|net|io]  Snapshot or history view
@@ -546,8 +548,9 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
     if command == "/log":
         return _dispatch_log(args, settings)
     if command == "/service":
-        if not args:
-            return "Usage: /service <name>"
+        if not args or args[0] == "all":
+            result = _run_with_indicator("list_services", list_services)
+            return render_service_list(result)
         svc = _run_with_indicator("service_status", service_status, args[0])
         return render_service(svc)
     if command == "/collect":
