@@ -133,6 +133,17 @@ def _start_collector(cfg: CollectorConfig) -> None:
     _collector_thread.start()
 
 
+def _is_panel_output(text: str) -> bool:
+    """박스 드로잉 패널 출력인지 감지 (render_reply 우회 여부 결정)."""
+    s = text.lstrip("\n")
+    while s.startswith("\033["):
+        end = s.find("m")
+        if end == -1:
+            break
+        s = s[end + 1:]
+    return s.startswith("┌")
+
+
 def _read_line(prompt_str: str) -> str:
     """raw TTY 한 줄 읽기.
 
@@ -183,6 +194,10 @@ def _read_line(prompt_str: str) -> str:
         _tty.setraw(fd)
         while True:
             b = sys.stdin.buffer.read(1)
+            if not b:   # 실제 EOF (파이프 닫힘, 리다이렉션 끝 등)
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+                raise EOFError
 
             # ── Enter ────────────────────────────────────────────────
             if b in (b"\r", b"\n"):
@@ -243,8 +258,12 @@ def _read_line(prompt_str: str) -> str:
             # ── Escape 시퀀스 (방향키, Home, End, Delete) ────────────
             if b == b"\x1b":
                 b2 = sys.stdin.buffer.read(1)
+                if not b2:
+                    raise EOFError
                 if b2 == b"[":
                     b3 = sys.stdin.buffer.read(1)
+                    if not b3:
+                        raise EOFError
                     if b3 == b"A":    # 위 — 히스토리 이전
                         if _HISTORY:
                             hist_pos = max(0, hist_pos - 1)
@@ -279,7 +298,10 @@ def _read_line(prompt_str: str) -> str:
                         # \x1b[{숫자}~ 또는 \x1b[{숫자};…{letter} 전체 소비
                         seq = b3
                         while not (seq[-1:].isalpha() or seq.endswith(b"~")):
-                            seq += sys.stdin.buffer.read(1)
+                            chunk = sys.stdin.buffer.read(1)
+                            if not chunk:
+                                raise EOFError
+                            seq += chunk
                         if seq == b"3~" and cursor_pos < len(buf):   # Delete
                             buf.pop(cursor_pos)
                             _redraw()
@@ -295,23 +317,12 @@ def _read_line(prompt_str: str) -> str:
             # ── '/' 첫 글자 → 라이브 피커 ───────────────────────────
             if b == b"/" and not buf:
                 _T.tcsetattr(fd, _T.TCSADRAIN, saved)
-                # prompt_line 을 피커에 전달해 필터가 프롬프트 줄에 인라인으로 표시됨
                 result = pick_with_filter(prompt_line)
                 if result:
                     sys.stdout.write(f"\r\033[K{prompt_line}{result}\n")
                     sys.stdout.flush()
-                    if result in NO_ARG_COMMANDS:
-                        return result
-                    try:
-                        import readline as _rl
-                        _rl.set_startup_hook(lambda: _rl.insert_text(result + " "))
-                        try:
-                            full = input(prompt()).strip()
-                        finally:
-                            _rl.set_startup_hook(None)
-                        return full or result
-                    except ImportError:
-                        return result
+                    return result
+                # 피커 취소
                 sys.stdout.write(f"\r\033[K{prompt_line}")
                 sys.stdout.flush()
                 _tty.setraw(fd)
@@ -335,7 +346,11 @@ def _read_line(prompt_str: str) -> str:
                 except UnicodeDecodeError as exc:
                     # 불완전한 멀티바이트 시퀀스 → 다음 바이트를 더 읽음
                     if exc.reason == "unexpected end of data" and len(pending) < 4:
-                        pending.extend(sys.stdin.buffer.read(1))
+                        chunk = sys.stdin.buffer.read(1)
+                        if not chunk:
+                            pending.clear()
+                            raise EOFError
+                        pending.extend(chunk)
                     else:
                         pending.clear()
                         break
@@ -488,7 +503,10 @@ def repl(settings: Settings | None = None) -> int:
         except Exception as exc:
             output = f"Error: {exc} / 오류: {exc}"
         if output:
-            print(render_reply(output))
+            if _is_panel_output(output):
+                print("\n" + output)
+            else:
+                print(render_reply(output))
         if raw:
             _HISTORY.append(raw)
             if len(_HISTORY) > 100:

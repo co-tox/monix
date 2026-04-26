@@ -106,12 +106,12 @@ def render_cpu(cpu_percent: float | None, load: tuple | None) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
     return "\n".join([
-        _rule(width),
+        _rule(width, "top"),
         _text(style("CPU", "bold"), inner),
-        _rule(width),
+        _rule(width, "mid"),
         _metric("CPU", cpu_percent, inner),
         _line("Load avg", _load(load), inner),
-        _rule(width),
+        _rule(width, "bottom"),
     ])
 
 
@@ -119,34 +119,34 @@ def render_memory(memory: dict) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
     return "\n".join([
-        _rule(width),
+        _rule(width, "top"),
         _text(style("Memory", "bold"), inner),
-        _rule(width),
+        _rule(width, "mid"),
         _metric("Memory", memory.get("percent"), inner, suffix=f"{human_bytes(memory.get('available'))} free"),
         _line("Used", human_bytes(memory.get("used")), inner),
         _line("Available", human_bytes(memory.get("available")), inner),
         _line("Total", human_bytes(memory.get("total")), inner),
-        _rule(width),
+        _rule(width, "bottom"),
     ])
 
 
 def render_disk(disks: list[dict]) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
-    lines = [_rule(width), _text(style("Disk", "bold"), inner), _rule(width)]
+    lines = [_rule(width, "top"), _text(style("Disk", "bold"), inner), _rule(width, "mid")]
     for disk in disks:
         suffix = f"{human_bytes(disk.get('free'))} free / {human_bytes(disk.get('total'))}"
         lines.append(_metric(disk["path"], disk.get("percent"), inner, suffix=suffix))
     if not disks:
         lines.append(_text("no disk data", inner))
-    lines.append(_rule(width))
+    lines.append(_rule(width, "bottom"))
     return "\n".join(lines)
 
 
 def render_network(interfaces: list[dict]) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
-    lines = [_rule(width), _text(style("Network I/O", "bold"), inner), _rule(width)]
+    lines = [_rule(width, "top"), _text(style("Network I/O", "bold"), inner), _rule(width, "mid")]
     visible = [i for i in interfaces if i["rx_bps"] > 0 or i["tx_bps"] > 0 or
                i.get("rx_bytes_total", 0) + i.get("tx_bytes_total", 0) >= 100 * 1024 * 1024]
     if not visible:
@@ -159,7 +159,7 @@ def render_network(interfaces: list[dict]) -> str:
             tx = human_bytes(int(iface["tx_bps"])) + "/s"
             label = iface["interface"]
             lines.append(_line(f"{label:<12}", f"↓ {rx:<14}  ↑ {tx}", inner))
-    lines.append(_rule(width))
+    lines.append(_rule(width, "bottom"))
     return "\n".join(lines)
 
 
@@ -169,28 +169,28 @@ def render_swap(swap: dict) -> str:
     total = swap.get("total") or 0
     if total == 0:
         return "\n".join([
-            _rule(width),
+            _rule(width, "top"),
             _text(style("Swap", "bold"), inner),
-            _rule(width),
+            _rule(width, "mid"),
             _text("스왑 없음 (disabled)", inner),
-            _rule(width),
+            _rule(width, "bottom"),
         ])
     return "\n".join([
-        _rule(width),
+        _rule(width, "top"),
         _text(style("Swap", "bold"), inner),
-        _rule(width),
+        _rule(width, "mid"),
         _metric("Swap", swap.get("percent"), inner, suffix=f"{human_bytes(swap.get('free'))} free"),
         _line("Used", human_bytes(swap.get("used")), inner),
         _line("Free", human_bytes(swap.get("free")), inner),
         _line("Total", human_bytes(swap.get("total")), inner),
-        _rule(width),
+        _rule(width, "bottom"),
     ])
 
 
 def render_disk_io(devices: list[dict]) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
-    lines = [_rule(width), _text(style("Disk I/O", "bold"), inner), _rule(width)]
+    lines = [_rule(width, "top"), _text(style("Disk I/O", "bold"), inner), _rule(width, "mid")]
     if not devices:
         lines.append(_text("no disk I/O data", inner))
     else:
@@ -199,7 +199,7 @@ def render_disk_io(devices: list[dict]) -> str:
             write_s = human_bytes(int(dev["write_bps"])) + "/s"
             label = dev["device"]
             lines.append(_line(f"{label:<12}", f"R {read_s:<14}  W {write_s}", inner))
-    lines.append(_rule(width))
+    lines.append(_rule(width, "bottom"))
     return "\n".join(lines)
 
 
