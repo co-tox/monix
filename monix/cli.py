@@ -16,7 +16,8 @@ from monix.tools.collect import (
     collect_and_save,
     load_config as load_collector_config,
     load_history,
-    purge_old_files,
+    metrics_path,
+    prune_metrics_file,
     save_config as save_collector_config,
 )
 from monix.picker import NO_ARG_COMMANDS, pick, pick_with_filter
@@ -123,7 +124,7 @@ def _start_collector(cfg: CollectorConfig) -> None:
             try:
                 collect_and_save(cfg.folder)
                 if cfg.retention_days > 0:
-                    purge_old_files(cfg.folder, cfg.retention_days)
+                    prune_metrics_file(cfg.folder, cfg.retention_days)
             except Exception:
                 pass
             if stop.wait(interval_sec):
@@ -1285,7 +1286,7 @@ def _dispatch_collect(args: list[str]) -> str:
             f"수집기 설정 [{status}]\n"
             f"  주기:     {_fmt_duration(cfg.interval_days)}\n"
             f"  보존기간: {_fmt_duration(cfg.retention_days)}\n"
-            f"  저장폴더: {cfg.folder}"
+            f"  저장파일: {metrics_path(cfg.folder)}"
         )
 
     if sub == "set":
@@ -1310,7 +1311,7 @@ def _dispatch_collect(args: list[str]) -> str:
             f"수집기 설정 완료\n"
             f"  주기:     {_fmt_duration(interval)}\n"
             f"  보존기간: {_fmt_duration(retention)}\n"
-            f"  저장폴더: {folder}"
+            f"  저장파일: {metrics_path(folder)}"
         )
 
     if sub == "remove":
