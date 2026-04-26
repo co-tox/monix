@@ -37,7 +37,7 @@ def tail_container(container: str, lines: int = DEFAULT_CONTAINER_TAIL) -> TailR
     except FileNotFoundError:
         return {"path": f"docker://{container}", "status": "error", "lines": ["docker command not found"]}
     except subprocess.TimeoutExpired:
-        return {"path": f"docker://{container}", "status": "error", "lines": ["타임아웃"]}
+        return {"path": f"docker://{container}", "status": "error", "lines": ["timeout"]}
     except subprocess.CalledProcessError as exc:
         lines_out = (exc.output or "").splitlines()
         return {"path": f"docker://{container}", "status": "error", "lines": lines_out or [str(exc)]}

@@ -2,8 +2,6 @@
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from monix.cli import dispatch
 
 
@@ -11,7 +9,7 @@ from monix.cli import dispatch
 
 def test_docker_no_args_shows_help():
     result = dispatch("/docker")
-    assert "Docker 명령어" in result
+    assert "Docker commands" in result
     assert "/docker ps" in result
 
 
@@ -32,7 +30,7 @@ def test_docker_ps_renders_containers():
 def test_docker_ps_no_containers():
     with patch("monix.cli.list_containers", return_value=[]):
         result = dispatch("/docker ps")
-    assert "없습니다" in result or "No running" in result
+    assert "No running" in result
 
 
 # --- /docker add ---
@@ -41,7 +39,7 @@ def test_docker_add_registers_alias():
     with patch("monix.cli.registry") as mock_reg:
         mock_reg.add.return_value = (MagicMock(), True)
         result = dispatch("/docker add @myapp myapp")
-    assert "등록" in result
+    assert "Registered" in result
     assert "myapp" in result
 
 
@@ -49,7 +47,7 @@ def test_docker_add_update_existing():
     with patch("monix.cli.registry") as mock_reg:
         mock_reg.add.return_value = (MagicMock(), False)
         result = dispatch("/docker add @myapp myapp")
-    assert "업데이트" in result
+    assert "Updated" in result
 
 
 def test_docker_add_uses_alias_as_container_when_omitted():
@@ -61,7 +59,7 @@ def test_docker_add_uses_alias_as_container_when_omitted():
 
 def test_docker_add_missing_alias():
     result = dispatch("/docker add")
-    assert "사용법" in result
+    assert "Usage" in result
 
 
 # --- /docker list ---
@@ -81,7 +79,7 @@ def test_docker_list_empty():
     with patch("monix.cli.registry") as mock_reg:
         mock_reg.load.return_value = []
         result = dispatch("/docker list")
-    assert "없습니다" in result or "없습" in result
+    assert "No Docker containers" in result
 
 
 # --- /docker @alias ---
@@ -109,7 +107,7 @@ def test_docker_alias_not_found():
         mock_reg.get.return_value = None
         result = dispatch("/docker @ghost")
     assert "ghost" in result
-    assert "등록" in result
+    assert "not registered" in result
 
 
 def test_docker_alias_wrong_type():
@@ -146,7 +144,7 @@ def test_docker_alias_live(capsys):
                 result = dispatch("/docker @web --live")
     out = capsys.readouterr().out
     assert "log1" in out
-    assert "종료" in result
+    assert "Stopped" in result
 
 
 # --- /docker remove ---
@@ -157,7 +155,7 @@ def test_docker_remove_ok():
         mock_reg.get.return_value = entry
         mock_reg.remove.return_value = True
         result = dispatch("/docker remove @web")
-    assert "제거" in result
+    assert "removed" in result
 
 
 def test_docker_remove_not_found():
@@ -179,7 +177,7 @@ def test_docker_remove_wrong_type():
 
 def test_docker_remove_missing_alias():
     result = dispatch("/docker remove")
-    assert "사용법" in result
+    assert "Usage" in result
 
 
 # --- /docker logs|search|live with @alias ---
@@ -199,7 +197,7 @@ def test_docker_logs_alias_not_found():
         mock_reg.get.return_value = None
         result = dispatch("/docker logs @ghost")
     assert "ghost" in result
-    assert "등록" in result
+    assert "not registered" in result
 
 
 def test_docker_search_alias_resolves():
@@ -223,7 +221,7 @@ def test_docker_live_alias_resolves(capsys):
                 result = dispatch("/docker live @api")
     out = capsys.readouterr().out
     assert "stream" in out
-    assert "종료" in result
+    assert "Stopped" in result
 
 
 # --- /docker logs ---
@@ -238,7 +236,7 @@ def test_docker_logs_ok():
 
 def test_docker_logs_missing_container_arg():
     result = dispatch("/docker logs")
-    assert "사용법" in result
+    assert "Usage" in result
 
 
 def test_docker_logs_respects_n():
@@ -259,7 +257,7 @@ def test_docker_search_no_pattern_returns_errors():
     fake_log = "INFO: ok\nERROR: crash\nDEBUG: fine"
     with patch("monix.tools.logs.docker.containers.subprocess.check_output", return_value=fake_log):
         result = dispatch("/docker search myapp")
-    assert "에러/경고" in result
+    assert "Error/Warn" in result
     assert "crash" in result
 
 
@@ -272,7 +270,7 @@ def test_docker_search_with_pattern():
 
 def test_docker_search_missing_container_arg():
     result = dispatch("/docker search")
-    assert "사용법" in result
+    assert "Usage" in result
 
 
 def test_docker_search_container_error():
@@ -286,7 +284,7 @@ def test_docker_search_container_error():
 
 def test_docker_live_missing_container_arg():
     result = dispatch("/docker live")
-    assert "사용법" in result
+    assert "Usage" in result
 
 
 def test_docker_live_streams_then_stops(capsys):
@@ -298,11 +296,11 @@ def test_docker_live_streams_then_stops(capsys):
     out = capsys.readouterr().out
     assert "line1" in out
     assert "line2" in out
-    assert "종료" in result
+    assert "Stopped" in result
 
 
 # --- /docker unknown subcommand ---
 
 def test_docker_unknown_subcommand_shows_help():
     result = dispatch("/docker frobnicate")
-    assert "Docker 명령어" in result
+    assert "Docker commands" in result

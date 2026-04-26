@@ -31,7 +31,7 @@ def _cpu_usage_linux(sample_seconds: float) -> float | None:
 
 
 def _cpu_usage_macos() -> float | None:
-    """top -l 2 로 두 번 샘플링해 순간 CPU 사용률을 구합니다."""
+    """Return overall CPU usage percentage by sampling 'top -l 2'."""
     try:
         output = subprocess.check_output(
             ["top", "-l", "2", "-n", "0", "-s", "1"],

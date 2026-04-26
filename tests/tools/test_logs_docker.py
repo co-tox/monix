@@ -28,7 +28,7 @@ def test_tail_container_timeout():
     ):
         result = tail_container("myapp")
     assert result["status"] == "error"
-    assert any("타임아웃" in l for l in result["lines"])
+    assert any("timeout" in l for l in result["lines"])
 
 
 def test_tail_container_called_process_error():

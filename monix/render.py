@@ -49,7 +49,7 @@ def render_welcome(snapshot: dict, gemini_enabled: bool) -> str:
         _line("Load", _load(snapshot.get("load_average")), inner),
         _line("Status", alert_text, inner),
         _rule(width, "mid"),
-        _text(f"{style('Ask me anything!', 'bold')}  CPU 상태 봐줘    nginx 왜 느려?    Memory analysis", inner),
+        _text(f"{style('Ask me anything!', 'bold')}  Check CPU    Why is nginx slow?    Memory analysis", inner),
         _text(f"{style('/help', 'cyan')} Commands   {style('/clear', 'cyan')} Clear history   {style('/watch 5', 'cyan')} Real-time   {style('/exit', 'cyan')} Exit", inner),
         _rule(width, "bottom"),
     ]
@@ -171,9 +171,9 @@ def render_swap(swap: dict) -> str:
         return "\n".join([
             _rule(width, "top"),
             _text(style("Swap", "bold"), inner),
-            _rule(width, "mid"),
-            _text("스왑 없음 (disabled)", inner),
-            _rule(width, "bottom"),
+            _rule(width),
+            _text("No swap (disabled)", inner),
+            _rule(width),
         ])
     return "\n".join([
         _rule(width, "top"),
@@ -354,7 +354,7 @@ def render_logs(result: dict) -> str:
 
 def render_log_list(entries: list) -> str:
     if not entries:
-        return "No logs registered. / 등록된 로그가 없습니다.\n  Register with: /log add @alias -app /path/to/file"
+        return "No logs registered.\n  Register with: /log add @alias -app /path/to/file"
     rows = [style(f"{'ALIAS':<22} {'TYPE':<8} PATH / CONTAINER", "bold")]
     for e in entries:
         target = e.path or e.container or "(none)"
@@ -387,7 +387,7 @@ def render_log_search(result: dict) -> str:
     total = result.get("total_scanned", 0)
     matches: list[dict] = result.get("matches", [])
 
-    query_label = f'Pattern "{query}"' if query else "에러/경고"
+    query_label = f'Pattern "{query}"' if query else "Error/Warn"
     error_count = sum(1 for m in matches if m["severity"] == "error")
     warn_count = sum(1 for m in matches if m["severity"] == "warn")
     found_color = "red" if error_count else "yellow" if warn_count else "green"
@@ -424,7 +424,7 @@ def render_nginx_summary(result: dict) -> str:
 
     total = summary.get("total", 0)
     if total == 0:
-        return "\n".join([header, "", "No parsed lines. / 파싱된 라인이 없습니다."])
+        return "\n".join([header, "", "No parsed lines."])
 
     lines = [
         header,
@@ -461,7 +461,7 @@ def render_nginx_summary(result: dict) -> str:
 
 def render_docker_containers(containers: list) -> str:
     if not containers:
-        return "No running containers found. / 실행 중인 컨테이너가 없습니다."
+        return "No running containers found."
 
     rows = [
         style(f"  {'NAME':<22} {'STATUS':<22} IMAGE", "bold"),
@@ -481,16 +481,16 @@ def render_docker_aliases(entries: list) -> str:
     docker_entries = [e for e in entries if e.type == "docker"]
     if not docker_entries:
         return (
-            "등록된 Docker 컨테이너가 없습니다.\n"
-            "  /docker add @alias <container> 로 등록하세요.\n"
-            "  실행 중인 컨테이너 목록: /docker ps"
+            "No Docker containers registered.\n"
+            "  Register with: /docker add @alias <container>\n"
+            "  List running containers: /docker ps"
         )
     rows = [style(f"  {'ALIAS':<22} CONTAINER", "bold")]
     for e in docker_entries:
         rows.append(f"  @{e.alias:<21} {e.container or '(none)'}")
     hints = ["", style("Commands:", "cyan")]
     for e in docker_entries:
-        hints.append(f"  /docker @{e.alias:<18} 로그 보기  |  --live  |  --search")
+        hints.append(f"  /docker @{e.alias:<18} View logs  |  --live  |  --search")
     return "\n".join(["Registered Docker Aliases", "", *rows, *hints])
 
 
@@ -546,9 +546,9 @@ def prompt() -> str:
 
 def colorize_line(line: str) -> str:
     stripped = line.strip()
-    if stripped.startswith(("Alerts:", "주의:", "오류:")):
+    if stripped.startswith(("Alerts:", "Warning:", "Error:")):
         return style(line, "red")
-    if stripped.startswith(("CPU", "Memory", "메모리", "Disk", "디스크", "Load")):
+    if stripped.startswith(("CPU", "Memory", "Disk", "Load")):
         return style(line, "cyan")
     if stripped.startswith(("-", "  -")):
         return style(line, "muted")
