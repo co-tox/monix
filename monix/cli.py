@@ -87,13 +87,11 @@ HELP = """Commands:
   /top [limit]                     Top processes (default 10)
   /service <name>                  Check systemd service status
 
-  /stat [cpu|memory|disk|swap|net|io]  Snapshot or history view (Type /stat for details)
-  /watch [cpu|memory|disk|swap|net|io] [sec]  Real-time monitoring (Type /watch for details)
-
+  /stat [all|cpu|mem|disk|swap|net|io]  Snapshot or history view
+  /watch [all|cpu|mem|disk|swap|net|io] [sec]  Real-time monitoring
   /collect list                    Show collector configuration
   /collect set <interval> <retention> <folder>  Configure collector
   /collect remove                  Disable and remove collector
-
   /log add @alias -app <path>      Register app log
   /log add @alias -nginx <path>    Register Nginx log
   /log add @alias -docker <name>   Register Docker container log
@@ -105,7 +103,6 @@ HELP = """Commands:
   /log /path/to/file [-n lines]    Direct path view (no registration needed)
   /log /path/to/file --live        Direct path real-time streaming
   /log remove @alias               Unregister log
-  /logs [path] [lines]             Direct log view (quick, no alias)
 
   /docker ps                       List running containers
   /docker stats [container]        Resource usage (CPU/mem/net/io)
@@ -121,9 +118,12 @@ HELP = """Commands:
   /docker search <container> [pattern] [-n lines]  Search error/pattern (direct)
   /docker live <container>         Real-time streaming (direct) [-n lines]
 
+  /logs <path> [lines]             Direct log view
+  /ask <question>                  Ask Gemini (requires GEMINI_API_KEY)
   /clear                           Clear conversation history
   /help                            Show this help
   /exit                            Exit
+
 
 You can also ask in natural language:
   "Why is the CPU so high?"  "Check nginx service"  "When will memory run out?"
@@ -535,23 +535,6 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         return _dispatch_docker(args, settings)
     if command == "/log":
         return _dispatch_log(args, settings)
-    if command == "/logs":
-        if not args:
-            return (
-                "Usage: /logs <path> [lines]\n"
-                "Example: /logs /var/log/syslog 100\n\n"
-                "To manage aliases, use /log command:\n"
-                "  /log add @alias -app <path>   Register log\n"
-                "  /log @alias [-n lines]        View registered log\n"
-                "  /log list                     List registered logs"
-            )
-        path = args[0]
-        err = _validate_flags(args[1:], frozenset(), "/logs <path> [lines]")
-        if err:
-            return err
-        lines = _int_arg(args, 1, 80)
-        log = _run_with_indicator("tail_log", tail_log, path, lines)
-        return render_logs(log)
     if command == "/service":
         if not args:
             return "Usage: /service <name>"

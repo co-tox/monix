@@ -19,7 +19,6 @@ COMMANDS: list[tuple[str, str]] = [
     ("/service",        "Service status  <name>"),
     ("/docker",         "Docker  ps·stats·top·inspect·logs"),
     ("/log",            "Log management  add·list·@alias·--live"),
-    ("/logs",           "Direct log view  [path] [lines]"),
     ("/clear",          "Clear history"),
     ("/help",           "Help"),
     ("/exit",           "Exit"),
