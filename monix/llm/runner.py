@@ -4,7 +4,7 @@ import os
 from typing import Any, Optional
 
 from monix.llm import executor, registry, trimmer
-from monix.llm.client import GeminiClient, MODEL_FLASH, MODEL_PRO
+from monix.llm.client import GeminiClient, MODEL_FLASH, MODEL_PRO, _HTTP_TIMEOUT
 from monix.llm.types import History, LLMError
 
 
@@ -28,6 +28,7 @@ def run_query(question: str, *, history: Optional[list[dict]] = None) -> Optiona
     token_budget = _resolve_token_budget()
     tool_result_max_bytes = _resolve_tool_result_max_bytes()
     max_output_tokens = _resolve_max_output_tokens()
+    timeout = _resolve_timeout()
 
     chat_history: History = history if history is not None else []
     chat_history.append({"role": "user", "parts": [{"text": question}]})
@@ -36,6 +37,7 @@ def run_query(question: str, *, history: Optional[list[dict]] = None) -> Optiona
         api_key=api_key,
         model=model,
         max_output_tokens=max_output_tokens,
+        timeout=timeout,
     )
     tool_schemas = registry.list_tools()
 
@@ -119,6 +121,10 @@ def _resolve_tool_result_max_bytes() -> int:
         "MONIX_LLM_TOOL_RESULT_MAX_BYTES",
         _DEFAULT_TOOL_RESULT_MAX_BYTES,
     )
+
+
+def _resolve_timeout() -> int:
+    return _resolve_positive_int("MONIX_LLM_HTTP_TIMEOUT", _HTTP_TIMEOUT)
 
 
 def _resolve_max_output_tokens() -> Optional[int]:

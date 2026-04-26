@@ -1,114 +1,149 @@
 # Monix
 
-Monix is a terminal assistant for operating servers from the CLI. It gives you a conversational shell for read-only monitoring tasks such as status checks, process inspection, log tailing, and service health review.
+**[English](./README.md) | [한국어](./README.ko.md)**
 
-It works without runtime dependencies. If `GEMINI_API_KEY` is set, Monix can ask Gemini to analyze the current server snapshot; otherwise it falls back to local intent handling.
+## Overview
 
-## Install
+Monix is a terminal-native, **read-only** AI assistant for server monitoring. It pairs a slash-command CLI with a Gemini-backed conversational agent so operators can inspect CPU, memory, disk, processes, services, and logs (plain files, Nginx, Docker) without leaving the shell — and without ever issuing destructive commands.
 
-From this directory:
+- **Two interfaces, one mental model** — fast `/slash` commands for known intents, natural-language chat for everything else. Both share the same underlying tools.
+- **Zero runtime dependencies** — standard library only (`urllib`, `json`, `inspect`, `subprocess`, …).
+- **Cross-platform** — Linux (procfs) and macOS (vm_stat / sysctl).
+
+---
+
+## Quick Start
+
+### Install
 
 ```bash
 uv venv
 uv pip install -e ".[dev]"
 ```
 
-Activate the virtual environment if you want to call `monix` directly:
-
-```bash
-source .venv/bin/activate
-monix
-```
-
-## Usage
-
-Start the interactive CLI:
+### Launch the interactive REPL
 
 ```bash
 uv run monix
 ```
 
-This opens the terminal UI with a live server summary and a prompt:
+On first launch, Monix prompts for a Gemini API key (paste-friendly, hidden input). Skip with Enter to run in local-only mode.
 
-```text
-> How is the CPU?
-> /top 10
-> /logs /var/log/syslog 80
-```
-
-If you really want to launch it with a `claude` command on a server that does not already have Claude Code installed, add a shell alias:
+### One-shot mode
 
 ```bash
-alias claude='monix'
+uv run monix /stat cpu
+uv run monix /log /var/log/syslog 100
+uv run monix "why is memory so high?"
 ```
 
-To keep that alias, put it in `~/.zshrc` or `~/.bashrc`.
+---
 
-Run one-shot checks:
 
-```bash
-uv run monix status
-uv run monix top --limit 10
-uv run monix logs /var/log/syslog --lines 80
-uv run monix service nginx
-uv run monix ask "Check CPU and memory and let me know if anything is risky"
-```
 
-Inside the interactive shell:
+### Examples
 
 ```text
-/status
-/watch 5
-/top 15
-/logs /var/log/syslog 100
-/service nginx
-/ask summarize current server status
-/help
-/exit
+> /stat cpu
+  CPU 23.4%   load 0.41 / 0.38 / 0.30
+
+> /log @api --search timeout
+  [3 matches in last 500 lines]
+  2026-04-26 12:14:02  ERROR  upstream timeout (10s) on /v1/orders
+  ...
+
+> show me containers using the most memory
+  → tool: list_containers
+  → tool: ... (correlates with snapshot)
+  Top container by RSS is `payments-api` (1.2 GB / 2 GB cap).
+  Recent restarts: 0.  Suggested follow-up: /docker logs payments-api
 ```
 
-Natural language also works for common monitoring requests:
+---
 
-```text
-show cpu status
-check memory and disk
-how is the nginx service?
-show latest logs from /var/log/syslog
+## Slash Commands
+
+### Snapshots and live monitoring
+
+| Command | Purpose |
+| --- | --- |
+| `/stat [cpu\|memory\|disk\|swap\|net\|io\|all]` | Current snapshot, or `/stat cpu 24h` for collected history |
+| `/watch [metric] [sec]` | Real-time refreshing dashboard (Ctrl-C to stop) |
+| `/cpu` `/memory` `/disk` `/swap` `/net` `/io` | Single-metric shortcuts |
+| `/top [N]` | Top-N processes by CPU |
+
+### Logs
+
+| Command | Purpose |
+| --- | --- |
+| `/log add @alias -app <path>` | Register an application log under an alias |
+| `/log add @alias -nginx <path>` | Register an Nginx log |
+| `/log add @alias -docker <name>` | Register a Docker container log |
+| `/log list` | Show all registered aliases |
+| `/log @alias [-n N]` | Tail a registered log |
+| `/log @alias --search [pattern]` | Filter for errors / a regex pattern |
+| `/log @alias --live` | Stream live |
+| `/log /path [-n N] [--live]` | Direct path access (no registration) |
+| `/log remove @alias` | Unregister |
+| `/logs <path> [N]` | One-shot tail (legacy form) |
+
+### Docker
+
+| Command | Purpose |
+| --- | --- |
+| `/docker ps` | List running containers |
+| `/docker add @alias <name>` | Register a container alias |
+| `/docker @alias [-n N] [--search] [--live]` | Tail / search / stream |
+| `/docker logs\|search\|live <name>` | Direct (no alias) |
+| `/docker remove @alias` | Unregister |
+
+### Services and AI
+
+| Command | Purpose |
+| --- | --- |
+| `/service <name>` | systemd service status |
+| `/ask <question>` | Force routing to Gemini |
+| `/clear` | Clear current conversation history |
+| `/help` | Show full command reference |
+| `/exit` | Quit |
+
+### Background metrics collector
+
+| Command | Purpose |
+| --- | --- |
+| `/collect set <interval> <retention> <folder>` | Start periodic snapshot collection (e.g. `1h 30d ./metrics`) |
+| `/collect list` | Show config and run state |
+| `/collect remove` | Disable and delete config |
+
+---
+
+## Agent Conversation (Multi-Turn Internals)
+
+Monix's conversational mode is a **two-dimensional multi-turn loop**, implemented in `monix/core/assistant.py` and `monix/llm/`.
+
+| Dimension | Meaning | State |
+| --- | --- | --- |
+| **A. Conversation turns** | Successive user prompts, each carrying prior context | Caller-owned `history: list[dict]`, accumulated across REPL turns |
+| **B. Tool-calling rounds** | Within one user prompt, the model may call tools repeatedly before answering | Loop inside `answer()` — bounded by `_MAX_TOOL_ROUNDS = 5` |
+
+### Per-prompt loop
+
 ```
+1. Take a fresh snapshot (CPU/mem/disk/processes/alerts) and
+   append it, plus the registered log alias table, to the user
+   text — gives the model a current "world view" up front.
 
-## Configuration
+2. Send working history + tool schemas → Gemini.
 
-Environment variables:
+3. Inspect response parts:
+     • text only          → terminal state, append (user, model)
+                            to caller history and return.
+     • functionCall(s)    → execute each via call_tool(),
+                            append the model candidate (verbatim,
+                            preserving thought_signature) and the
+                            functionResponse parts to the working
+                            history, then loop.
 
-- `GEMINI_API_KEY`: enables Gemini-backed analysis.
-- `MONIX_MODEL`: Gemini model name. Defaults to `gemini-1.5-flash`.
-- `MONIX_LOG_FILE`: default log file for `/logs`. Defaults to `/var/log/syslog` when it exists, otherwise `/var/log/messages`.
-- `MONIX_CPU_WARN`: CPU warning threshold percent. Defaults to `85`.
-- `MONIX_MEM_WARN`: memory warning threshold percent. Defaults to `85`.
-- `MONIX_DISK_WARN`: disk warning threshold percent. Defaults to `90`.
-
-Monix only performs read-only monitoring commands. It does not restart services, modify files, or run arbitrary shell commands.
-
-## Project Structure
-
-Monix follows the same broad shape used by agentic CLIs:
-
-```text
-monix/
-  cli.py              # command parser and interactive REPL
-  render.py           # terminal UI rendering
-  config/             # environment-backed settings and thresholds
-  core/               # assistant intent handling and local answers
-  llm/                # Gemini API client
-  tools/              # read-only monitoring tools
-  safety/             # read-only policy definitions
-  assistant.py        # backwards-compatible facade
-  monitor.py          # backwards-compatible facade
+4. After 5 rounds the loop exits with a tools-disabled summary
+   call so the model is forced to answer with what it already saw.
 ```
-
-The current tool layer is intentionally read-only:
-
-- `tools/system.py`: host snapshot, CPU, memory, disk, uptime, alerts
-- `tools/processes.py`: top process inspection
-- `tools/logs.py`: log tailing
-- `tools/services.py`: systemd service status
