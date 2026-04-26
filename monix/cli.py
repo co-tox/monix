@@ -10,9 +10,8 @@ from monix.config import Settings
 from monix.core.assistant import answer, infer_service_name, local_answer
 from monix.picker import NO_ARG_COMMANDS, pick
 from monix.tools.logs import tail_log
-from monix.tools.processes import top_processes
 from monix.tools.services import service_status
-from monix.tools.system import collect_snapshot
+from monix.tools.system import collect_snapshot, top_processes
 from monix.render import clear_screen, prompt, render_logs, render_reply, render_processes, render_service, render_snapshot, render_welcome
 
 
@@ -39,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"monix {__version__}")
         return 0
     if args.command == "status":
-        print(render_snapshot(collect_snapshot(settings.thresholds)))
+        print(render_snapshot(collect_snapshot(settings)))
         return 0
     if args.command == "top":
         print(render_processes(top_processes(args.limit)))
@@ -83,7 +82,7 @@ def repl(settings: Settings | None = None) -> int:
     settings = settings or Settings.from_env()
     history: list[dict] = []
     print(clear_screen(), end="")
-    print(render_welcome(collect_snapshot(settings.thresholds), settings.gemini_enabled))
+    print(render_welcome(collect_snapshot(settings), settings.gemini_enabled))
     while True:
         try:
             raw = input(prompt()).strip()
@@ -129,7 +128,7 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             history.clear()
         return "대화 기록을 초기화했습니다. 새로운 대화를 시작해요!"
     if command == "/status":
-        return render_snapshot(collect_snapshot(settings.thresholds))
+        return render_snapshot(collect_snapshot(settings))
     if command == "/watch":
         interval = _int_arg(args, 0, 5)
         return watch(interval, settings)
@@ -179,7 +178,7 @@ def watch(interval: int, settings: Settings | None = None) -> str:
     try:
         while True:
             print("\033[2J\033[H", end="")
-            print(render_snapshot(collect_snapshot(settings.thresholds)))
+            print(render_snapshot(collect_snapshot(settings)))
             print(f"\nRefreshing every {interval}s. Press Ctrl-C to stop.")
             time.sleep(interval)
     except KeyboardInterrupt:

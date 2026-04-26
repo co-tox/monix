@@ -45,19 +45,27 @@ class Settings:
     model: str
     log_file: str
     thresholds: Thresholds
+    platform: str  # "linux" | "darwin" — MONIX_PLATFORM으로 override 가능
 
     @classmethod
     def from_env(cls) -> "Settings":
+        import platform as _platform
         return cls(
             gemini_api_key=os.getenv("GEMINI_API_KEY"),
             model=os.getenv("MONIX_MODEL", "gemini-1.5-flash"),
             log_file=default_log_file(),
             thresholds=Thresholds.from_env(),
+            platform=_resolve_platform(os.getenv("MONIX_PLATFORM", _platform.system())),
         )
 
     @property
     def gemini_enabled(self) -> bool:
         return bool(self.gemini_api_key)
+
+
+def _resolve_platform(value: str) -> str:
+    normalized = value.lower()
+    return "mac" if normalized == "darwin" else normalized
 
 
 def default_log_file() -> str:
