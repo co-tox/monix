@@ -924,6 +924,43 @@ def render_docker_aliases(entries: list) -> str:
     return "\n".join(lines)
 
 
+def render_service_list(result: dict) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    services = result.get("services", [])
+    lines = [
+        _rule(width, "top"),
+        _text(f"{style('Services', 'bold')}  {badge(str(len(services)), 'cyan')}", inner),
+        _rule(width, "mid"),
+    ]
+    if result["status"] == "unknown":
+        lines.append(_text(style(result.get("details", ""), "muted"), inner))
+    elif not services:
+        lines.append(_text(style("no running services found", "muted"), inner))
+    else:
+        col_name = 36
+        col_sub = 10
+        header = (
+            f"{style('UNIT', 'muted'):<{col_name + 9}}"
+            f"{style('STATE', 'muted'):<{col_sub + 9}}"
+            f"{style('DESCRIPTION', 'muted')}"
+        )
+        lines.append(_text(header, inner))
+        for svc in services:
+            active = svc["active"]
+            sub = svc["sub"]
+            color = "green" if sub == "running" else "red" if active in ("failed", "inactive") else "yellow"
+            name_col = _clip_ansi(style(svc["name"], "cyan"), col_name)
+            name_pad = " " * max(0, col_name - _visible_len(name_col))
+            sub_col = style(sub, color)
+            sub_pad = " " * max(0, col_sub - len(sub))
+            desc = svc["description"]
+            row = f"{name_col}{name_pad}  {sub_col}{sub_pad}  {style(desc, 'muted')}"
+            lines.append(_text(row, inner))
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
+
+
 def render_service(result: dict) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
