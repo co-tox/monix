@@ -11,8 +11,8 @@ from monix import __version__
 from monix.config import Settings
 from monix.core.assistant import answer, infer_service_name, local_answer
 from monix.picker import NO_ARG_COMMANDS, pick, pick_with_filter
-from monix.tools.logs import follow_log, registry, tail_log
-from monix.tools.logs.docker import follow_container, tail_container
+from monix.tools.logs import follow_log, registry, search_log, tail_log
+from monix.tools.logs.docker import follow_container, list_containers, search_container, tail_container
 from monix.tools.services import service_status
 from monix.tools.logs.nginx import tail_nginx_access
 from monix.render import (
@@ -59,32 +59,36 @@ from monix.tools.system import (
 HELP = """Commands:
   /status                          서버 상태 (CPU, 메모리, 디스크, 알림)
   /watch [seconds]                 실시간 모니터링 (Ctrl-C로 종료)
+  /top [limit]                     CPU 상위 프로세스
+  /memory                          메모리 사용량 상세
+  /disk                            디스크 사용량
+  /cpu                             CPU 사용률 + Load average
+  /swap                            스왑 사용량
+  /net                             네트워크 I/O (인터페이스별 bps)
+  /io                              디스크 I/O (읽기/쓰기 속도)
+  /service <name>                  systemd 서비스 상태
+
   /log add @alias -app <path>      앱 로그 등록
+  /log add @alias -nginx <path>    Nginx 로그 등록
   /log add @alias -docker <name>   Docker 컨테이너 로그 등록
   /log list                        등록된 로그 목록
-  /log docker-list                 실행 중인 Docker 컨테이너 목록
-  /log @                           등록된 alias 보기
   /log @alias [-n lines]           등록된 로그 보기
   /log @alias --search [pattern]   에러/경고 검색 (pattern 생략 시 에러 필터)
   /log @alias --live [-n lines]    등록된 로그 실시간 스트리밍
+  /log /path/to/file [-n lines]    경로 직접 지정 (등록 불필요)
   /log /path/to/file --live        경로 직접 실시간 스트리밍
+  /log remove @alias               로그 등록 해제
+
+  /docker ps                       실행 중인 컨테이너 목록
+  /docker logs <container>         컨테이너 로그 보기 [-n lines]
+  /docker search <container>       에러/패턴 검색 [pattern] [-n lines]
+  /docker live <container>         실시간 로그 스트리밍 [-n lines]
+
   /logs [path] [lines]             로그 직접 보기 (기존)
-  /service <name>                  systemd 서비스 상태
+  /ask <question>                  Gemini에게 질문 (GEMINI_API_KEY 필요)
   /clear                           대화 기록 초기화
   /help                            도움말
   /exit                            종료
-  /ask <question>                  Gemini에게 질문 (GEMINI_API_KEY 필요)
-  /log remove @alias               로그 등록 해제
-  /log /path/to/file [-n lines]    경로 직접 지정 (등록 불필요)
-  /log list                        등록된 로그 목록
-  /log add @alias -nginx <path>    Nginx 로그 등록
-  /top [limit]                     CPU 상위 프로세스
-  /memory                 메모리 사용량 상세
-  /disk                   디스크 사용량
-  /cpu                    CPU 사용률 + Load average
-  /swap                   스왑 사용량
-  /net                    네트워크 I/O (인터페이스별 bps)
-  /io                     디스크 I/O (읽기/쓰기 속도)
 
 자연어로도 바로 물어볼 수 있어요:
   "CPU 왜 이렇게 높아?"  "nginx 서비스 확인해줘"  "메모리 언제 부족해질까?"
@@ -315,6 +319,8 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         limit = _int_arg(args, 0, 10)
         procs = _run_with_indicator("top_processes", top_processes, limit)
         return render_processes(procs)
+    if command == "/docker":
+        return _dispatch_docker(args, settings)
     if command == "/log":
         return _dispatch_log(args, settings)
     if command == "/logs":
@@ -397,6 +403,63 @@ def _pick_and_fill() -> str:
         return selected
 
 
+def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG001
+    if not args:
+        return _docker_help()
+
+    sub = args[0]
+
+    if sub in ("ps", "list"):
+        return render_docker_containers(list_containers())
+
+    if sub == "logs":
+        if len(args) < 2:
+            return "사용법: /docker logs <container> [-n lines]"
+        container = args[1]
+        n = _get_opt(args, "-n", 80)
+        return render_logs(tail_container(container, n))
+
+    if sub == "search":
+        if len(args) < 2:
+            return "사용법: /docker search <container> [pattern] [-n lines]"
+        container = args[1]
+        pattern_candidates = [a for a in args[2:] if not a.startswith("-")]
+        pattern = pattern_candidates[0] if pattern_candidates else None
+        n = _get_opt(args, "-n", 500)
+        return render_log_search(search_container(container, pattern=pattern, lines=n))
+
+    if sub == "live":
+        if len(args) < 2:
+            return "사용법: /docker live <container> [-n lines]"
+        container = args[1]
+        n = _get_opt(args, "-n", 20)
+        from monix.render import style
+        print(f"\n  {style('→', 'cyan')} docker://{container}  Ctrl-C to stop / Ctrl-C 로 종료\n")
+        try:
+            for line in follow_container(container, n):
+                if line is None:
+                    break
+                print("  " + colorize_log_line(line))
+        except KeyboardInterrupt:
+            pass
+        except Exception as exc:
+            return f"Streaming error: {exc} / 스트리밍 오류: {exc}"
+        return "Stopped streaming. / 스트리밍을 종료했습니다."
+
+    return _docker_help()
+
+
+def _docker_help() -> str:
+    return (
+        "Docker 명령어:\n"
+        "  /docker ps                              실행 중인 컨테이너 목록\n"
+        "  /docker logs <container> [-n lines]     컨테이너 로그 보기\n"
+        "  /docker search <container> [pattern]    에러/패턴 검색 (pattern 생략 시 에러 필터)\n"
+        "  /docker search <container> [pattern] -n 1000  검색 범위 지정\n"
+        "  /docker live <container> [-n lines]     실시간 로그 스트리밍"
+    )
+
+
 def _dispatch_log(args: list[str], settings: Settings) -> str:
     if not args:
         return _log_help()
@@ -442,6 +505,8 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
             print(f"\n  {style('→', 'cyan')} {raw_path}  Ctrl-C to stop / Ctrl-C 로 종료\n")
             try:
                 for line in follow_log(raw_path, n):
+                    if line is None:
+                        break
                     print("  " + colorize_log_line(line))
             except KeyboardInterrupt:
                 pass
@@ -521,6 +586,8 @@ def _live_log(entry, initial_lines: int) -> str:
 
     try:
         for line in gen:
+            if line is None:
+                break
             print("  " + colorize_log_line(line))
     except KeyboardInterrupt:
         pass
@@ -650,33 +717,9 @@ def _extract_search_pattern(text: str, alias: str) -> str | None:
 
 
 def _log_search_entry(entry, pattern: str | None, lines: int = 500) -> str:
-    """Run search_log or docker equivalent and render the result."""
+    """Run search on a log entry and render the result."""
     if entry.type == "docker":
-        raw = tail_container(entry.container or "", lines)
-        all_lines = raw.get("lines", [])
-        import re as _re
-        from monix.tools.logs.app import classify_line
-        if pattern is not None:
-            try:
-                compiled = _re.compile(pattern, _re.IGNORECASE)
-            except _re.error:
-                compiled = _re.compile(_re.escape(pattern), _re.IGNORECASE)
-            matches = [
-                {"lineno": i + 1, "line": l, "severity": classify_line(l)}
-                for i, l in enumerate(all_lines) if compiled.search(l)
-            ]
-        else:
-            matches = [
-                {"lineno": i + 1, "line": l, "severity": classify_line(l)}
-                for i, l in enumerate(all_lines) if classify_line(l) != "normal"
-            ]
-        result = {
-            "path": f"docker://{entry.container}",
-            "status": raw["status"],
-            "query": pattern,
-            "total_scanned": len(all_lines),
-            "matches": matches,
-        }
+        result = search_container(entry.container or "", pattern=pattern, lines=lines)
     else:
         result = search_log(entry.path or "", pattern=pattern, lines=lines)
     return render_log_search(result)

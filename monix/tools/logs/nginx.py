@@ -3,8 +3,14 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from monix.tools.logs.app import tail_log
+from monix.tools.logs._types import NginxSummary, NginxTailResult
+from monix.tools.logs.app import DEFAULT_TAIL_LINES, tail_log
 
+DEFAULT_NGINX_LINES: int = 200
+_TOP_N: int = 10
+
+# Assumes nginx Combined Log Format:
+# $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent
 _ACCESS_RE = re.compile(
     r'(?P<ip>[\d.a-fA-F:]+) - \S+ \[(?P<time>[^\]]+)\] '
     r'"(?P<method>\S+) (?P<path>\S+) [^"]+" (?P<status>\d{3}) (?P<bytes>[\d-]+)'
@@ -18,11 +24,11 @@ _NGINX_ERROR_TAGS = {"[error]", "[crit]", "[alert]", "[emerg]"}
 
 
 def parse_access_line(line: str) -> dict | None:
-    """Parse a single Combined Log Format access log line.
+    """Parse a single nginx Combined Log Format access log line.
 
+    Format: $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent
     Returns a dict with ip, time, method, path, status (int), bytes (int),
-    or None if the line does not match the expected format.
-    bytes is 0 when nginx logs '-' (unknown body size).
+    or None if the line does not match. bytes is 0 when nginx logs '-'.
     """
     m = _ACCESS_RE.match(line)
     if not m:
@@ -38,14 +44,14 @@ def parse_access_line(line: str) -> dict | None:
     }
 
 
-def summarize_access_log(lines: list[str]) -> dict:
-    """Aggregate statistics from a list of nginx access log lines.
+def summarize_access_log(lines: list[str]) -> NginxSummary:
+    """Aggregate statistics from a list of nginx Combined Log Format access log lines.
 
     Returns:
         total        — number of successfully parsed lines
         status_dist  — {status_code: count}
-        top_paths    — top 10 paths by request count [(path, count), ...]
-        top_ips      — top 10 client IPs by request count [(ip, count), ...]
+        top_paths    — top _TOP_N paths by request count [(path, count), ...]
+        top_ips      — top _TOP_N client IPs by request count [(ip, count), ...]
         error_lines  — raw lines with HTTP status >= 400
     """
     status_counter: Counter[int] = Counter()
@@ -66,14 +72,14 @@ def summarize_access_log(lines: list[str]) -> dict:
     return {
         "total": sum(status_counter.values()),
         "status_dist": dict(status_counter),
-        "top_paths": path_counter.most_common(10),
-        "top_ips": ip_counter.most_common(10),
+        "top_paths": path_counter.most_common(_TOP_N),
+        "top_ips": ip_counter.most_common(_TOP_N),
         "error_lines": error_lines,
     }
 
 
-def tail_nginx_access(path: str, lines: int = 200) -> dict:
-    """Tail an nginx access log and return lines with a parsed summary.
+def tail_nginx_access(path: str, lines: int = DEFAULT_NGINX_LINES) -> NginxTailResult:
+    """Tail a nginx Combined Log Format access log and return lines with a parsed summary.
 
     Extends the tail_log() result dict with a 'summary' key.
     If the file cannot be read, summary is {}.
