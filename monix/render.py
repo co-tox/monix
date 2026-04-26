@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 
 from monix import __version__
 from monix.tools.system import human_bytes
@@ -1083,7 +1084,8 @@ def _visible_len(value: str) -> int:
             if char == "m":
                 in_escape = False
             continue
-        length += 1
+        eaw = unicodedata.east_asian_width(char)
+        length += 2 if eaw in ("W", "F") else 1
     return length
 
 
@@ -1101,10 +1103,12 @@ def _clip_ansi(value: str, max_len: int) -> str:
             if char == "m":
                 in_escape = False
             continue
-        if visible >= max_len:
+        eaw = unicodedata.east_asian_width(char)
+        char_width = 2 if eaw in ("W", "F") else 1
+        if visible + char_width > max_len:
             break
         result.append(char)
-        visible += 1
+        visible += char_width
     if supports_color() and result and not "".join(result).endswith("\033[0m"):
         result.append("\033[0m")
     return "".join(result)
