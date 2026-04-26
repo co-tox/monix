@@ -133,6 +133,107 @@ def colorize_log_line(line: str) -> str:
     return line
 
 
+def render_log_search(result: dict) -> str:
+    path = result["path"]
+    status = result["status"]
+
+    if status != "ok":
+        return f"Log 검색: {path} {badge(status, 'red')}"
+
+    query = result.get("query")
+    total = result.get("total_scanned", 0)
+    matches: list[dict] = result.get("matches", [])
+
+    query_label = f'패턴 "{query}"' if query else "에러/경고"
+    error_count = sum(1 for m in matches if m["severity"] == "error")
+    warn_count = sum(1 for m in matches if m["severity"] == "warn")
+    found_color = "red" if error_count else "yellow" if warn_count else "green"
+    found_text = f"{len(matches)}건 발견" if matches else "이상 없음"
+
+    lines = [
+        f"Log: {path}",
+        f"{style(query_label, 'cyan')} 검색 — 스캔 {total:,}줄  {badge(found_text, found_color)}",
+    ]
+
+    if not matches:
+        return "\n".join(lines)
+
+    lines.append("")
+    for m in matches:
+        color = "red" if m["severity"] == "error" else "yellow"
+        lineno_str = f"L{m['lineno']:>5}"
+        lines.append(f"  {style(lineno_str, 'muted')}  {style(m['line'], color)}")
+
+    lines += [
+        "",
+        f"  에러 {style(str(error_count) + '건', 'red' if error_count else 'green')}  "
+        f"경고 {style(str(warn_count) + '건', 'yellow' if warn_count else 'green')}",
+    ]
+    return "\n".join(lines)
+
+
+def render_nginx_summary(result: dict) -> str:
+    if result["status"] != "ok":
+        return render_logs(result)
+
+    summary = result.get("summary") or {}
+    header = f"Log: {result['path']} {badge('ok', 'green')}"
+
+    total = summary.get("total", 0)
+    if total == 0:
+        return "\n".join([header, "", "파싱된 라인이 없습니다. (nginx Combined Log Format 확인 필요)"])
+
+    lines = [
+        header,
+        "",
+        f"{style('Nginx Access Log 요약', 'bold')} — 총 {total:,}건",
+        "",
+        style("상태 코드:", "cyan"),
+    ]
+
+    status_dist: dict = summary.get("status_dist", {})
+    for code in sorted(status_dist):
+        count = status_dist[code]
+        pct = count / total * 100
+        color = "green" if code < 400 else "yellow" if code < 500 else "red"
+        lines.append(f"  {style(str(code), color)}   {count:>6,}  ({pct:.1f}%)")
+
+    top_paths: list = summary.get("top_paths", [])
+    if top_paths:
+        lines += ["", style("상위 경로 (Top 10):", "cyan")]
+        for path, count in top_paths:
+            lines.append(f"  {path:<40} {count:>6,}")
+
+    top_ips: list = summary.get("top_ips", [])
+    if top_ips:
+        lines += ["", style("상위 IP (Top 10):", "cyan")]
+        for ip, count in top_ips:
+            lines.append(f"  {ip:<30} {count:>6,}")
+
+    error_count = len(summary.get("error_lines", []))
+    lines += ["", f"4xx/5xx 에러: {style(str(error_count) + '건', 'red' if error_count else 'green')}"]
+
+    return "\n".join(lines)
+
+
+def render_docker_containers(containers: list) -> str:
+    if not containers:
+        return "실행 중인 컨테이너가 없습니다. Docker가 설치되어 있는지 확인하세요."
+
+    rows = [
+        style(f"  {'NAME':<22} {'STATUS':<22} IMAGE", "bold"),
+    ]
+    for c in containers:
+        rows.append(f"  {c['name']:<22} {c['status']:<22} {c['image']}")
+
+    hints = ["", style("등록 명령어:", "cyan")]
+    for c in containers:
+        name = c["name"]
+        hints.append(f"  /log add @{name:<16} -docker {name}")
+
+    return "\n".join(["실행 중인 Docker 컨테이너", "", *rows, *hints])
+
+
 def render_service(result: dict) -> str:
     status_color = "green" if result["status"] == "ok" else "yellow" if result["status"] == "unknown" else "red"
     return f"Service: {result['name']} {badge(result['status'], status_color)}\n{result['details']}"

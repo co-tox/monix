@@ -9,8 +9,9 @@ from monix import __version__
 from monix.config import Settings
 from monix.core.assistant import answer, infer_service_name, local_answer
 from monix.picker import NO_ARG_COMMANDS, pick
-from monix.tools.logs import follow_log, registry, tail_log
-from monix.tools.logs.docker import follow_container, tail_container
+from monix.tools.logs import follow_log, registry, search_log, tail_log
+from monix.tools.logs.docker import follow_container, list_containers, tail_container
+from monix.tools.logs.nginx import tail_nginx_access
 from monix.tools.processes import top_processes
 from monix.tools.services import service_status
 from monix.tools.system import collect_snapshot, top_processes
@@ -18,9 +19,12 @@ from monix.render import (
     clear_screen,
     colorize_log_line,
     prompt,
+    render_docker_containers,
     render_log_aliases,
     render_log_list,
+    render_log_search,
     render_logs,
+    render_nginx_summary,
     render_reply,
     render_processes,
     render_service,
@@ -37,8 +41,10 @@ HELP = """Commands:
   /log add @alias -nginx <path>    Nginx 로그 등록
   /log add @alias -docker <name>   Docker 컨테이너 로그 등록
   /log list                        등록된 로그 목록
+  /log docker-list                 실행 중인 Docker 컨테이너 목록
   /log @                           등록된 alias 보기
   /log @alias [-n lines]           등록된 로그 보기
+  /log @alias --search [pattern]   에러/경고 검색 (pattern 생략 시 에러 필터)
   /log @alias --live [-n lines]    등록된 로그 실시간 스트리밍
   /log /path/to/file [-n lines]    경로 직접 지정 (등록 불필요)
   /log /path/to/file --live        경로 직접 실시간 스트리밍
@@ -51,7 +57,8 @@ HELP = """Commands:
   /exit                            종료
 
 자연어로도 바로 물어볼 수 있어요:
-  "CPU 왜 이렇게 높아?"  "nginx 서비스 확인해줘"  "메모리 언제 부족해질까?\""""
+  "CPU 왜 이렇게 높아?"  "nginx 서비스 확인해줘"  "메모리 언제 부족해질까?"
+  "@api 로그에서 에러 확인해줘"  "@nginx timeout 찾아줘"\""""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -179,6 +186,11 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
 def dispatch_natural(raw: str, settings: Settings | None = None, history: list[dict] | None = None) -> str:
     settings = settings or Settings.from_env()
 
+    # @alias 자연어 로그 검색 감지 — "@api 에러 확인해줘" 같은 형태 처리
+    alias = _detect_log_alias(raw)
+    if alias:
+        return _log_search_natural(alias, raw)
+
     # Gemini 활성화 시 모든 자연어를 AI로 라우팅 (Claude처럼)
     if settings.gemini_enabled:
         return answer(raw, settings, history)
@@ -259,8 +271,14 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
             n = _get_opt(args, "-n", 80)
             if "--live" in args:
                 return _live_log(entry, n)
-            result = tail_container(entry.container or "", n) if entry.type == "docker" else tail_log(entry.path or "", n)
-            return render_logs(result)
+            if "--search" in args:
+                pattern = _get_str_opt(args, "--search")
+                return _log_search_entry(entry, pattern, lines=_get_opt(args, "-n", 500))
+            if entry.type == "docker":
+                return render_logs(tail_container(entry.container or "", n))
+            if entry.type == "nginx":
+                return render_nginx_summary(tail_nginx_access(entry.path or "", n))
+            return render_logs(tail_log(entry.path or "", n))
     elif sub.startswith("/") or sub.startswith("~"):
         raw_path = sub
 
@@ -284,6 +302,9 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
 
     if sub == "list":
         return render_log_list(registry.load())
+
+    if sub == "docker-list":
+        return render_docker_containers(list_containers())
 
     if sub in ("remove", "rm"):
         if len(args) < 2:
@@ -362,8 +383,10 @@ def _log_help() -> str:
         "  /log add @alias -nginx /path/to/file  Nginx 로그 등록\n"
         "  /log add @alias -docker <container>   Docker 컨테이너 로그 등록\n"
         "  /log list                             등록된 로그 목록\n"
+        "  /log docker-list                      실행 중인 Docker 컨테이너 목록\n"
         "  /log @                                등록된 alias 보기\n"
         "  /log @alias [-n 100]                  등록된 로그 보기\n"
+        "  /log @alias --search [pattern]        에러/경고 검색 (pattern 생략 시 에러 필터)\n"
         "  /log @alias --live [-n 50]            등록된 로그 실시간 스트리밍\n"
         "  /log /path/to/file [-n 100]           경로 직접 지정 (등록 불필요)\n"
         "  /log /path/to/file --live             경로 직접 실시간 스트리밍\n"
@@ -384,6 +407,165 @@ def _int_arg(args: list[str], index: int, default: int) -> int:
         return int(args[index])
     except (IndexError, ValueError):
         return default
+
+
+def _get_str_opt(args: list[str], flag: str) -> str | None:
+    try:
+        idx = args.index(flag)
+        value = args[idx + 1]
+        return value if not value.startswith("-") else None
+    except (ValueError, IndexError):
+        return None
+
+
+# ── 자연어 @alias 로그 검색 ────────────────────────────────────────────────────
+
+# 에러/패턴 검색 인텐트 — 이 단어가 있으면 search_log 로 라우팅
+_ERROR_INTENTS = frozenset({
+    "에러", "에러가", "에러있어", "오류", "오류가", "있는지", "있나", "있어",
+    "error", "errors", "exception", "fatal", "critical",
+})
+
+# tail(보기) 인텐트 — 에러 인텐트보다 약하며, 에러 인텐트가 없을 때 tail 로 라우팅
+_TAIL_INTENTS = frozenset({
+    "마지막", "최근", "끝", "tail", "last", "latest",
+    "보여줘", "보여", "출력해줘", "출력", "표시", "나와", "줄", "라인", "line", "lines",
+})
+
+_LOG_SEARCH_INTENTS = frozenset({
+    "검색", "검색해줘", "검색해서", "찾아줘", "찾아", "확인해줘", "확인",
+    "에러", "에러가", "에러있어", "오류", "오류가", "봐줘", "봐", "알려줘",
+    "보여줘", "있는지", "있나", "있어", "체크", "체크해줘",
+    "error", "errors", "check", "search", "find",
+})
+
+_LOG_SEARCH_STOPWORDS = frozenset({
+    "로그", "를", "을", "에서", "에", "의", "로", "은", "는", "이",
+    "해줘", "줘", "log", "logs", "the", "in", "for", "a", "an",
+})
+
+
+def _detect_log_alias(text: str) -> str | None:
+    """Return alias name if text contains @alias that exists in the registry."""
+    import re as _re
+    match = _re.search(r"@(\w+)", text)
+    if not match:
+        return None
+    alias = match.group(1)
+    return alias if registry.get(alias) is not None else None
+
+
+def _extract_search_pattern(text: str, alias: str) -> str | None:
+    """Extract explicit search keyword from natural language.
+
+    Looks for quoted strings first, then non-Korean alphanum tokens that
+    survive stopword filtering.  Returns None when only error-intent words
+    are present (→ caller uses error/warn filter instead).
+    """
+    import re as _re
+
+    # 1. Quoted pattern: "timeout" or 'OOM'
+    quoted = _re.search(r'["\'](.+?)["\']', text)
+    if quoted:
+        return quoted.group(1)
+
+    # 2. Strip @alias token, stopwords, and pure-intent words, keep the rest
+    skip = _LOG_SEARCH_STOPWORDS | _LOG_SEARCH_INTENTS | {alias, f"@{alias}"}
+    tokens = text.split()
+    candidates = []
+    for token in tokens:
+        clean = token.strip("@.,?!:；。").lower()
+        if clean in skip or not clean:
+            continue
+        # Keep ASCII alphanumeric tokens that look like keywords (e.g. "500", "timeout")
+        if _re.match(r"^[a-zA-Z0-9_\-\.]+$", clean):
+            candidates.append(clean)
+
+    return candidates[0] if candidates else None
+
+
+def _log_search_entry(entry, pattern: str | None, lines: int = 500) -> str:
+    """Run search_log or docker equivalent and render the result."""
+    if entry.type == "docker":
+        raw = tail_container(entry.container or "", lines)
+        all_lines = raw.get("lines", [])
+        import re as _re
+        from monix.tools.logs.app import classify_line
+        if pattern is not None:
+            try:
+                compiled = _re.compile(pattern, _re.IGNORECASE)
+            except _re.error:
+                compiled = _re.compile(_re.escape(pattern), _re.IGNORECASE)
+            matches = [
+                {"lineno": i + 1, "line": l, "severity": classify_line(l)}
+                for i, l in enumerate(all_lines) if compiled.search(l)
+            ]
+        else:
+            matches = [
+                {"lineno": i + 1, "line": l, "severity": classify_line(l)}
+                for i, l in enumerate(all_lines) if classify_line(l) != "normal"
+            ]
+        result = {
+            "path": f"docker://{entry.container}",
+            "status": raw["status"],
+            "query": pattern,
+            "total_scanned": len(all_lines),
+            "matches": matches,
+        }
+    else:
+        result = search_log(entry.path or "", pattern=pattern, lines=lines)
+    return render_log_search(result)
+
+
+def _detect_log_intent(text: str) -> str:
+    """Return 'search' or 'tail' based on keywords in the natural language text.
+
+    Rules (in priority order):
+    1. Explicit error keywords (에러, 오류, error …)  → 'search'
+    2. Explicit tail keywords (마지막, 최근, 출력 …) without error words → 'tail'
+    3. Default → 'tail'  (safer: showing lines is more useful than empty results)
+    """
+    tokens = {t.strip("@.,?!:；。").lower() for t in text.split()}
+    if tokens & _ERROR_INTENTS:
+        return "search"
+    if tokens & _TAIL_INTENTS:
+        return "tail"
+    return "tail"
+
+
+def _extract_lines_count(text: str, default: int = 80) -> int:
+    """Extract line count from expressions like '마지막 100줄', 'last 50 lines', '-n 200'."""
+    import re as _re
+    # "마지막 N줄" or "최근 N줄" or "N줄" or "last N lines" or "-n N"
+    m = _re.search(r"(?:마지막|최근|last|tail|-n)\s+(\d+)", text, _re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    m = _re.search(r"(\d+)\s*(?:줄|라인|lines?)", text, _re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return default
+
+
+def _log_search_natural(alias: str, text: str) -> str:
+    """Handle natural language log request triggered by @alias mention."""
+    entry = registry.get(alias)
+    if entry is None:
+        return f"@{alias} 로그가 등록되어 있지 않습니다. /log add 로 등록하세요."
+
+    intent = _detect_log_intent(text)
+
+    if intent == "tail":
+        n = _extract_lines_count(text, default=80)
+        if entry.type == "docker":
+            return render_logs(tail_container(entry.container or "", n))
+        if entry.type == "nginx":
+            from monix.tools.logs.nginx import tail_nginx_access
+            return render_nginx_summary(tail_nginx_access(entry.path or "", n))
+        return render_logs(tail_log(entry.path or "", n))
+
+    # intent == "search"
+    pattern = _extract_search_pattern(text, alias)
+    return _log_search_entry(entry, pattern)
 
 
 if __name__ == "__main__":
