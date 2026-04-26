@@ -554,7 +554,13 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
     if command == "/log":
         return _dispatch_log(args, settings)
     if command == "/service":
-        if not args or args[0] == "all":
+        if not args:
+            return (
+                "Service commands:\n"
+                "  /service list      List all services\n"
+                "  /service <name>    Show service status"
+            )
+        if args[0] == "list":
             result = _run_with_indicator("list_services", list_services)
             return render_service_list(result)
         svc = _run_with_indicator("service_status", service_status, args[0])
