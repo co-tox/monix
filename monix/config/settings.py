@@ -50,8 +50,9 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         import platform as _platform
+        from monix.config.keystore import load_api_key
         return cls(
-            gemini_api_key=os.getenv("GEMINI_API_KEY"),
+            gemini_api_key=os.getenv("GEMINI_API_KEY") or load_api_key(),
             model=os.getenv("MONIX_MODEL", "gemini-1.5-flash"),
             log_file=default_log_file(),
             thresholds=Thresholds.from_env(),

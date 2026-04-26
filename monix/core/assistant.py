@@ -5,9 +5,11 @@ import textwrap
 
 from monix.config import Settings
 from monix.llm.gemini import GeminiClient
+from monix.tools.calling import TOOL_DECLARATIONS, call_tool
 from monix.tools.system import collect_snapshot, human_bytes
 
-_MAX_HISTORY = 20  # keep last 20 messages (~10 turns) to avoid token overflow
+_MAX_HISTORY = 20   # keep last 20 messages (~10 turns)
+_MAX_TOOL_ROUNDS = 5  # max tool-call iterations per query to prevent infinite loops
 
 
 def answer(question: str | list[str], settings: Settings | None = None, history: list[dict] | None = None) -> str:
@@ -19,26 +21,60 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
 
     if client.enabled:
         snapshot_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
-        user_text = f"{question}\n\n[현재 서버 스냅샷]\n{snapshot_text}"
+        user_text = (
+            f"{question}\n\n"
+            f"[현재 서버 스냅샷]\n{snapshot_text}\n"
+            f"기본 로그 파일: {settings.log_file}"
+        )
         user_msg = {"role": "user", "parts": [{"text": user_text}]}
 
-        if history is not None:
-            trimmed = history[-_MAX_HISTORY:]
-            full_history = trimmed + [user_msg]
-        else:
-            full_history = [user_msg]
+        # working copy of history for this agentic loop — never mutate history directly
+        working: list[dict] = list((history or [])[-_MAX_HISTORY:]) + [user_msg]
 
-        result = client.chat(full_history)
+        for _ in range(_MAX_TOOL_ROUNDS):
+            text, tool_calls = client.chat_with_tools(working, TOOL_DECLARATIONS)
 
-        if history is not None and result and not result.startswith("Gemini API"):
-            history.append(user_msg)
-            history.append({"role": "model", "parts": [{"text": result}]})
-            if len(history) > _MAX_HISTORY:
-                del history[: len(history) - _MAX_HISTORY]
+            if not tool_calls:
+                # Final answer from the LLM
+                _append_to_history(history, user_msg, text)
+                return wrap(text or local_answer(question, snapshot))
 
-        return wrap(result or local_answer(question, snapshot))
+            # Append the model's tool-call turn to the working history
+            working.append({
+                "role": "model",
+                "parts": [
+                    {"functionCall": {"name": tc.name, "args": tc.args}}
+                    for tc in tool_calls
+                ],
+            })
+            # Execute every requested tool and feed results back
+            responses = []
+            for tc in tool_calls:
+                result = call_tool(tc.name, tc.args)
+                responses.append(
+                    {"functionResponse": {"name": tc.name, "response": {"result": result}}}
+                )
+            working.append({"role": "user", "parts": responses})
+
+        # _MAX_TOOL_ROUNDS exhausted — ask the LLM to summarise what it found
+        text, _ = client.chat_with_tools(working, [])
+        _append_to_history(history, user_msg, text)
+        return wrap(text or local_answer(question, snapshot))
 
     return wrap(local_answer(question, snapshot))
+
+
+def _append_to_history(
+    history: list[dict] | None,
+    user_msg: dict,
+    model_text: str | None,
+) -> None:
+    if history is None or not model_text or model_text.startswith("Gemini API"):
+        return
+    history.append(user_msg)
+    history.append({"role": "model", "parts": [{"text": model_text}]})
+    if len(history) > _MAX_HISTORY:
+        del history[: len(history) - _MAX_HISTORY]
 
 
 def local_answer(question: str, snapshot: dict | None = None) -> str:

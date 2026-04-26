@@ -256,8 +256,48 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _prompt_api_key_setup(settings: Settings) -> Settings:
+    import getpass
+    from monix.config.keystore import save_api_key
+    from monix.llm.gemini import GeminiClient
+
+    print("\n  Gemini API 키를 등록하면 AI 기능을 사용할 수 있습니다.")
+    print("  붙여넣기 가능 (입력 내용은 보안상 표시되지 않습니다).")
+    print("  건너뛰려면 Enter를 누르세요.\n")
+    for attempt in range(3):
+        try:
+            key = getpass.getpass("  Gemini API Key: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not key:
+            break
+        print("  키 유효성 확인 중...", end="", flush=True)
+        ok, err = GeminiClient.validate(key, settings.model)
+        if ok:
+            save_api_key(key)
+            print("\r  ✓ API 키가 저장되었습니다.             ")
+            return Settings(
+                gemini_api_key=key,
+                model=settings.model,
+                log_file=settings.log_file,
+                thresholds=settings.thresholds,
+                platform=settings.platform,
+            )
+        else:
+            remaining = 2 - attempt
+            msg = f"\r  ✗ 유효하지 않은 키입니다. ({err})"
+            if remaining > 0:
+                msg += f" 다시 시도하세요. ({remaining}회 남음)"
+            print(msg + "             ")
+    print("  AI 기능 없이 Local monitor 모드로 시작합니다.\n")
+    return settings
+
+
 def repl(settings: Settings | None = None) -> int:
     settings = settings or Settings.from_env()
+    if not settings.gemini_api_key:
+        settings = _prompt_api_key_setup(settings)
     history: list[dict] = []
     print(clear_screen(), end="")
     print(render_welcome(collect_snapshot(settings), settings.gemini_enabled))

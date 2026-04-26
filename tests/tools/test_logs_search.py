@@ -290,5 +290,5 @@ def test_log_search_natural_error_filter(tmp_path, monkeypatch):
     with patch("monix.tools.logs.app.subprocess.check_output", return_value=fake_output):
         from monix.cli import _log_search_natural
         result = _log_search_natural("api", "@api 로그를 검색해서 에러가 있는지 확인해줘")
-    assert "에러/경고" in result
+    assert "Error/Warn" in result  # render.py uses English after i18n migration
     assert "crash" in result
