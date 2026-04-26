@@ -20,3 +20,8 @@ monix = "monix.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["monix*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
