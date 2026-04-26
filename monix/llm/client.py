@@ -22,7 +22,7 @@ MODEL_PRO = "gemini-3.1-pro-preview"
 MODEL_FLASH = "gemini-3.1-flash-preview"
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-_HTTP_TIMEOUT = 20
+_HTTP_TIMEOUT = 60
 
 _DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 1024
 _DEFAULT_TOOLS_MAX_OUTPUT_TOKENS = 2048
@@ -42,10 +42,12 @@ class GeminiClient:
         api_key: Optional[str],
         model: str,
         max_output_tokens: Optional[int] = None,
+        timeout: Optional[int] = None,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.max_output_tokens = max_output_tokens
+        self.timeout = timeout if timeout is not None else _HTTP_TIMEOUT
 
     @property
     def enabled(self) -> bool:
@@ -118,7 +120,7 @@ class GeminiClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=_HTTP_TIMEOUT) as response:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             body = ""
