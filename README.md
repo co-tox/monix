@@ -23,7 +23,7 @@ python3 -m pip install -e ".[dev]"
 Start the interactive CLI:
 
 ```bash
-monix
+python3 -m monix.cli
 ```
 
 This opens the Claude-style terminal UI with a live server summary and a prompt:
