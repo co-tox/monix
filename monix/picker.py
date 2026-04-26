@@ -12,9 +12,13 @@ except ImportError:
 
 COMMANDS: list[tuple[str, str]] = [
     ("/status",  "서버 상태  CPU · 메모리 · 디스크"),
+    ("/cpu",     "CPU 사용률 + Load average"),
+    ("/memory",  "메모리 사용량 상세"),
+    ("/disk",    "디스크 사용량"),
     ("/watch",   "실시간 모니터링  [초]"),
     ("/top",     "프로세스 TOP  [개수]"),
-    ("/logs",    "로그 보기  [경로] [줄수]"),
+    ("/log",     "로그 관리  add·list·@alias·--live"),
+    ("/logs",    "로그 보기 (기존)  [경로] [줄수]"),
     ("/service", "서비스 상태  <이름>"),
     ("/ask",     "Gemini 질문  <내용>"),
     ("/clear",   "대화 초기화"),
@@ -22,7 +26,7 @@ COMMANDS: list[tuple[str, str]] = [
     ("/exit",    "종료"),
 ]
 
-NO_ARG_COMMANDS = {"/status", "/clear", "/help", "/exit"}
+NO_ARG_COMMANDS = {"/status", "/cpu", "/memory", "/disk", "/clear", "/help", "/exit"}
 
 
 def pick() -> str | None:

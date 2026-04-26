@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 
 from monix import __version__
 from monix.tools.system import human_bytes
+
+_LOG_ERROR_RE = re.compile(r"\b(ERROR|FATAL|CRITICAL|Exception|Traceback)\b", re.IGNORECASE)
+_LOG_WARN_RE = re.compile(r"\b(WARN|WARNING)\b", re.IGNORECASE)
 
 
 _MASCOT = [
@@ -93,6 +97,47 @@ def render_snapshot(snapshot: dict) -> str:
     return "\n".join(lines)
 
 
+def render_cpu(cpu_percent: float | None, load: tuple | None) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    return "\n".join([
+        _rule(width),
+        _text(style("CPU", "bold"), inner),
+        _rule(width),
+        _metric("CPU", cpu_percent, inner),
+        _line("Load avg", _load(load), inner),
+        _rule(width),
+    ])
+
+
+def render_memory(memory: dict) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    return "\n".join([
+        _rule(width),
+        _text(style("Memory", "bold"), inner),
+        _rule(width),
+        _metric("Memory", memory.get("percent"), inner, suffix=f"{human_bytes(memory.get('available'))} free"),
+        _line("Used", human_bytes(memory.get("used")), inner),
+        _line("Available", human_bytes(memory.get("available")), inner),
+        _line("Total", human_bytes(memory.get("total")), inner),
+        _rule(width),
+    ])
+
+
+def render_disk(disks: list[dict]) -> str:
+    width = min(shutil.get_terminal_size((100, 24)).columns, 110)
+    inner = max(width - 4, 60)
+    lines = [_rule(width), _text(style("Disk", "bold"), inner), _rule(width)]
+    for disk in disks:
+        suffix = f"{human_bytes(disk.get('free'))} free / {human_bytes(disk.get('total'))}"
+        lines.append(_metric(disk["path"], disk.get("percent"), inner, suffix=suffix))
+    if not disks:
+        lines.append(_text("no disk data", inner))
+    lines.append(_rule(width))
+    return "\n".join(lines)
+
+
 def render_processes(processes: list[dict]) -> str:
     return "\n".join([style("PID      CPU%   MEM%   COMMAND", "bold"), *_process_lines(processes)])
 
@@ -102,7 +147,31 @@ def render_logs(result: dict) -> str:
     header = f"Log: {result['path']} {badge(result['status'], status_color)}"
     if result["status"] != "ok":
         return header
-    return "\n".join([header, *result["lines"]])
+    return "\n".join([header, *(colorize_log_line(line) for line in result["lines"])])
+
+
+def render_log_list(entries: list) -> str:
+    if not entries:
+        return "등록된 로그가 없습니다.\n  /log add @alias -app /path/to/file 로 등록하세요."
+    rows = [style(f"{'ALIAS':<22} {'TYPE':<8} PATH / CONTAINER", "bold")]
+    for e in entries:
+        target = e.path or e.container or "(없음)"
+        rows.append(f"@{e.alias:<21} {e.type:<8} {target}")
+    return "\n".join(rows)
+
+
+def render_log_aliases(alias_list: list[str]) -> str:
+    if not alias_list:
+        return "등록된 로그가 없습니다. /log add 로 등록하세요."
+    return "\n".join(["등록된 로그 (alias):", *(f"  @{a}" for a in alias_list)])
+
+
+def colorize_log_line(line: str) -> str:
+    if _LOG_ERROR_RE.search(line):
+        return style(line, "red")
+    if _LOG_WARN_RE.search(line):
+        return style(line, "yellow")
+    return line
 
 
 def render_service(result: dict) -> str:
