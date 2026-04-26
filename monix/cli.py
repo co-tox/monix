@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import shlex
 import sys
+import threading
 import time
 
 from monix import __version__
@@ -23,10 +25,23 @@ from monix.render import (
     render_reply,
     render_processes,
     render_snapshot,
+    render_welcome, render_memory, render_disk, render_cpu,
+)
+from monix.tools.system import collect_snapshot, cpu_usage_percent, disk_info, load_average, memory_info, top_processes
+from monix.tools.system import collect_snapshot
+from monix.render import (
+    clear_screen,
+    prompt,
+    render_logs,
+    render_reply,
+    render_processes,
+    render_service,
+    render_snapshot,
+    render_tool_done,
+    render_tool_fail,
+    render_tool_start,
     render_welcome,
 )
-    render_service,
-from monix.tools.system import collect_snapshot, cpu_usage_percent, disk_info, load_average, memory_info, top_processes
 
 
 HELP = """Commands:
@@ -55,6 +70,51 @@ HELP = """Commands:
 
 자연어로도 바로 물어볼 수 있어요:
   "CPU 왜 이렇게 높아?"  "nginx 서비스 확인해줘"  "메모리 언제 부족해질까?\""""
+
+
+class Spinner:
+    _FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, message: str = "") -> None:
+        self._message = message
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        for frame in itertools.cycle(self._FRAMES):
+            if self._stop.is_set():
+                break
+            sys.stdout.write(f"\r  {frame}  {self._message}")
+            sys.stdout.flush()
+            time.sleep(0.08)
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+    def __enter__(self) -> "Spinner":
+        if sys.stdout.isatty():
+            self._thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join()
+
+
+def _run_with_indicator(label: str, fn, *args, **kwargs):
+    if not sys.stdout.isatty():
+        return fn(*args, **kwargs)
+    print(render_tool_start(label))
+    t0 = time.time()
+    try:
+        result = fn(*args, **kwargs)
+        sys.stdout.write(f"\033[A\r\033[K{render_tool_done(label, time.time() - t0)}\n")
+        sys.stdout.flush()
+        return result
+    except Exception:
+        sys.stdout.write(f"\033[A\r\033[K{render_tool_fail(label, time.time() - t0)}\n")
+        sys.stdout.flush()
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -174,35 +234,42 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         return render_memory(memory_info())
     if command == "/disk":
         return render_disk(disk_info())
+        snap = _run_with_indicator("snapshot", collect_snapshot, settings.thresholds)
+        return render_snapshot(snap)
     if command == "/watch":
         interval = _int_arg(args, 0, 5)
         return watch(interval, settings)
     if command == "/top":
         limit = _int_arg(args, 0, 10)
+        procs = _run_with_indicator("top_processes", top_processes, limit)
+        return render_processes(procs)
         return render_processes(top_processes(limit))
     if command == "/log":
         return _dispatch_log(args, settings)
     if command == "/logs":
         path = args[0] if args else settings.log_file
         lines = _int_arg(args, 1, 80)
-        return render_logs(tail_log(path, lines))
+        log = _run_with_indicator("tail_log", tail_log, path, lines)
+        return render_logs(log)
     if command == "/service":
         if not args:
             return "사용법: /service <name>"
-        return render_service(service_status(args[0]))
+        svc = _run_with_indicator("service_status", service_status, args[0])
+        return render_service(svc)
     if command == "/ask":
         if not args:
             return "사용법: /ask <question>"
-        return answer(" ".join(args), settings, history)
+        with Spinner("Gemini에 질문 중..."):
+            return answer(" ".join(args), settings, history)
     return f"알 수 없는 명령입니다: {command}\n/help를 입력해 사용 가능한 명령을 확인하세요."
 
 
 def dispatch_natural(raw: str, settings: Settings | None = None, history: list[dict] | None = None) -> str:
     settings = settings or Settings.from_env()
 
-    # Gemini 활성화 시 모든 자연어를 AI로 라우팅 (Claude처럼)
     if settings.gemini_enabled:
-        return answer(raw, settings, history)
+        with Spinner("Gemini에 질문 중..."):
+            return answer(raw, settings, history)
 
     # Local fallback
     lowered = raw.lower()
