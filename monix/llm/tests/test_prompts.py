@@ -29,3 +29,10 @@ def test_system_prompt_contains_core_sections():
     assert "tail_log" in SYSTEM_PROMPT
     # Freshness guidance
     assert "measured_at" in SYSTEM_PROMPT
+
+
+def test_system_prompt_forbids_bold_markdown():
+    """The output-format rule must explicitly ban Markdown bold."""
+    assert "Output Format" in SYSTEM_PROMPT
+    assert "Do not use Markdown bold" in SYSTEM_PROMPT
+    assert "**text**" in SYSTEM_PROMPT

@@ -99,6 +99,25 @@ def test_resolve_tool_result_max_bytes(monkeypatch, value, expected):
     assert runner._resolve_tool_result_max_bytes() == expected
 
 
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (None, None),
+        ("", None),
+        ("garbage", None),
+        ("0", None),
+        ("-5", None),
+        ("4096", 4096),
+    ],
+)
+def test_resolve_max_output_tokens(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv("MONIX_LLM_MAX_OUTPUT_TOKENS", raising=False)
+    else:
+        monkeypatch.setenv("MONIX_LLM_MAX_OUTPUT_TOKENS", value)
+    assert runner._resolve_max_output_tokens() == expected
+
+
 def test_run_query_returns_none_when_no_api_key(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     history: list[dict] = []

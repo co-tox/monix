@@ -27,11 +27,16 @@ def run_query(question: str, *, history: Optional[list[dict]] = None) -> Optiona
     max_calls = _resolve_max_calls()
     token_budget = _resolve_token_budget()
     tool_result_max_bytes = _resolve_tool_result_max_bytes()
+    max_output_tokens = _resolve_max_output_tokens()
 
     chat_history: History = history if history is not None else []
     chat_history.append({"role": "user", "parts": [{"text": question}]})
 
-    client = GeminiClient(api_key=api_key, model=model)
+    client = GeminiClient(
+        api_key=api_key,
+        model=model,
+        max_output_tokens=max_output_tokens,
+    )
     tool_schemas = registry.list_tools()
 
     total_tokens = 0
@@ -114,6 +119,24 @@ def _resolve_tool_result_max_bytes() -> int:
         "MONIX_LLM_TOOL_RESULT_MAX_BYTES",
         _DEFAULT_TOOL_RESULT_MAX_BYTES,
     )
+
+
+def _resolve_max_output_tokens() -> Optional[int]:
+    """Read ``MONIX_LLM_MAX_OUTPUT_TOKENS`` and return an int or ``None``.
+
+    Returning ``None`` lets :class:`GeminiClient` keep its per-method
+    built-in defaults (1024 for ``chat``, 2048 for ``chat_with_tools``).
+    """
+    raw = os.environ.get("MONIX_LLM_MAX_OUTPUT_TOKENS")
+    if raw is None:
+        return None
+    try:
+        value = int(raw.strip())
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return value
 
 
 def _resolve_positive_int(name: str, default: int) -> int:

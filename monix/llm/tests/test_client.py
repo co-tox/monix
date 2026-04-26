@@ -187,3 +187,49 @@ def test_legacy_chat_extracts_text():
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
         out = client.chat([{"role": "user", "parts": [{"text": "hi"}]}])
     assert out == "hi"
+
+
+def test_max_output_tokens_defaults_per_method():
+    """When ``max_output_tokens`` is unset, each method uses its own default."""
+    client = GeminiClient(_API_KEY, MODEL_FLASH)
+    captured = {}
+
+    payload = {
+        "candidates": [{"content": {"role": "model", "parts": [{"text": "ok"}]}}],
+        "usageMetadata": {"totalTokenCount": 1},
+    }
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _success_response(payload)
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        client.chat([{"role": "user", "parts": [{"text": "hi"}]}])
+    assert captured["body"]["generationConfig"]["maxOutputTokens"] == 1024
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        client.chat_with_tools([{"role": "user", "parts": [{"text": "hi"}]}], [])
+    assert captured["body"]["generationConfig"]["maxOutputTokens"] == 2048
+
+
+def test_max_output_tokens_override_applies_to_both_methods():
+    """Explicit ``max_output_tokens`` overrides defaults in both entry points."""
+    client = GeminiClient(_API_KEY, MODEL_FLASH, max_output_tokens=512)
+    captured = {}
+
+    payload = {
+        "candidates": [{"content": {"role": "model", "parts": [{"text": "ok"}]}}],
+        "usageMetadata": {"totalTokenCount": 1},
+    }
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _success_response(payload)
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        client.chat([{"role": "user", "parts": [{"text": "hi"}]}])
+    assert captured["body"]["generationConfig"]["maxOutputTokens"] == 512
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        client.chat_with_tools([{"role": "user", "parts": [{"text": "hi"}]}], [])
+    assert captured["body"]["generationConfig"]["maxOutputTokens"] == 512
