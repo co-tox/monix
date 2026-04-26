@@ -1399,6 +1399,28 @@ def _parse_duration_days(s: str) -> float:
         return 0.0
 
 
+def _check_folder_writable(folder: str) -> str | None:
+    """폴더 생성 및 쓰기 권한 검사. 문제 있으면 에러 메시지 반환, 없으면 None."""
+    import os
+    from pathlib import Path
+    path = Path(folder).expanduser().resolve()
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        return (
+            f"Permission denied: cannot create '{path}'\n"
+            f"  Fix: sudo mkdir -p {path} && sudo chown $USER:$USER {path}"
+        )
+    except OSError as exc:
+        return f"Cannot create folder '{path}': {exc}"
+    if not os.access(path, os.W_OK):
+        return (
+            f"Permission denied: no write access to '{path}'\n"
+            f"  Fix: sudo chown $USER:$USER {path}"
+        )
+    return None
+
+
 def _fmt_duration(days: float) -> str:
     """Format float days to a human-readable string."""
     seconds = days * 86400
@@ -1458,6 +1480,9 @@ def _dispatch_collect(args: list[str]) -> str:
         if interval <= 0 or retention <= 0:
             return "Interval and retention must be greater than 0."
         folder = rest[2]
+        folder_err = _check_folder_writable(folder)
+        if folder_err:
+            return folder_err
         cfg = CollectorConfig(interval_days=interval, retention_days=retention, folder=folder)
         save_collector_config(cfg)
         _start_collector(cfg)
