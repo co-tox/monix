@@ -14,9 +14,11 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+mcp = ["mcp>=1.0.0; python_version >= '3.10'"]
 
 [project.scripts]
 monix = "monix.cli:main"
+monix-mcp = "monix.mcp:main"
 
 [tool.setuptools.packages.find]
 include = ["monix*"]

@@ -39,6 +39,15 @@ uv run monix /log /var/log/syslog 100
 uv run monix "왜 메모리 사용량이 이렇게 높지?"
 ```
 
+### MCP 서버
+
+MCP 서버는 선택 기능이며 CLI와 동일한 읽기 전용 도구 registry를 사용합니다.
+
+```bash
+uv pip install -e ".[mcp]"
+uv run monix-mcp
+```
+
 ---
 
 

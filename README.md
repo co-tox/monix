@@ -39,6 +39,15 @@ uv run monix /log /var/log/syslog 100
 uv run monix "why is memory so high?"
 ```
 
+### MCP server
+
+The MCP server is optional and uses the same read-only tool registry as the CLI.
+
+```bash
+uv pip install -e ".[mcp]"
+uv run monix-mcp
+```
+
 ---
 
 

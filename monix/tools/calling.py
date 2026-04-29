@@ -8,6 +8,7 @@ from monix.tools.logs import search_log, tail_log
 from monix.tools.logs.docker import list_containers, search_container, tail_container
 from monix.tools.logs.nginx import tail_nginx_access
 from monix.tools.services import service_status
+from monix.tools.system import collect_snapshot, cpu_usage_percent, disk_info, memory_info, top_processes
 
 _MAX_RESULT_CHARS = 6000  # truncate large results to avoid token overload
 
@@ -21,6 +22,66 @@ class ToolCall:
 
 # Gemini function_declarations format (also used as source for Anthropic)
 TOOL_DECLARATIONS: list[dict] = [
+    {
+        "name": "collect_snapshot",
+        "description": (
+            "Collect a read-only server health snapshot including host, OS, uptime, load average, "
+            "CPU, memory, disks, top processes, and alerts. Use this first for broad health checks."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "cpu_usage_percent",
+        "description": "Return the current overall CPU usage percentage.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "memory_info",
+        "description": "Return memory totals, used bytes, available bytes, and usage percentage.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "disk_info",
+        "description": "Return disk usage information for one or more filesystem paths.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filesystem paths to inspect. Defaults to ['/'].",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "top_processes",
+        "description": "Return the top N processes sorted by CPU usage.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of processes to return. Defaults to 10.",
+                    "minimum": 1,
+                },
+            },
+            "required": [],
+        },
+    },
     {
         "name": "list_containers",
         "description": (
@@ -181,6 +242,11 @@ ANTHROPIC_TOOLS: list[dict] = [
 ]
 
 _HANDLERS: dict[str, Any] = {
+    "collect_snapshot": collect_snapshot,
+    "cpu_usage_percent": cpu_usage_percent,
+    "memory_info": memory_info,
+    "disk_info": disk_info,
+    "top_processes": top_processes,
     "list_containers": list_containers,
     "tail_log": tail_log,
     "search_log": search_log,
