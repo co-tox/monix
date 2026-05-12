@@ -45,6 +45,7 @@ def collect_and_save(folder: str) -> str:
     """메트릭을 수집해 JSONL 파일에 append. 저장된 파일 경로를 반환."""
     from monix.tools.system import (
         cpu_usage_percent,
+        cpu_core_usage_percents,
         disk_info,
         disk_io,
         load_average,
@@ -66,6 +67,7 @@ def collect_and_save(folder: str) -> str:
     t1.start()
     t2.start()
     cpu = cpu_usage_percent()
+    cpu_cores = cpu_core_usage_percents()
     load = load_average()
     mem = memory_info()
     disks = disk_info()
@@ -76,6 +78,7 @@ def collect_and_save(folder: str) -> str:
     data = {
         "timestamp": datetime.now().isoformat(),
         "cpu_percent": cpu,
+        "cpu_cores": cpu_cores,
         "load_average": load,
         "memory": mem,
         "disks": disks,

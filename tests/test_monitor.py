@@ -1,6 +1,7 @@
 from monix.config import Thresholds
+from monix.cli import dispatch_command
 from monix.core.assistant import infer_service_name, local_answer
-from monix.render import render_snapshot
+from monix.render import render_cpu, render_snapshot
 from monix.tools.system import build_alerts, human_bytes, human_duration
 
 
@@ -40,6 +41,19 @@ def test_render_snapshot_minimal():
     rendered = render_snapshot(snapshot)
     assert "Host: app-1" in rendered
     assert "Alerts:" in rendered
+
+
+def test_render_cpu_shows_cores():
+    rendered = render_cpu(12.5, (0.1, 0.2, 0.3), [10.0, 20.0])
+    assert "Cores" in rendered
+    assert "Core 0" in rendered
+    assert "Core 1" in rendered
+
+
+def test_cpu_shortcut_dispatches_cpu_panel():
+    rendered = dispatch_command("/cpu")
+    assert "CPU" in rendered
+    assert "Load avg" in rendered
 
 
 def test_local_answer_cpu():

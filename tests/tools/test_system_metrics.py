@@ -208,7 +208,7 @@ def test_collect_snapshot_returns_dict():
 
 def test_collect_snapshot_required_keys():
     result = collect_snapshot()
-    for key in ("host", "os", "time", "uptime", "load_average", "cpu_percent",
+    for key in ("host", "os", "time", "uptime", "load_average", "cpu_percent", "cpu_cores",
                 "memory", "disks", "top_processes", "alerts"):
         assert key in result
 

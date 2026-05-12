@@ -175,17 +175,46 @@ def render_snapshot(snapshot: dict) -> str:
     return "\n".join(lines)
 
 
-def render_cpu(cpu_percent: float | None, load: tuple | None) -> str:
+def render_cpu(cpu_percent: float | None, load: tuple | None, core_percents: list[float] | None = None) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
-    return "\n".join([
+    lines = [
         _rule(width, "top"),
         _text(style("CPU", "bold"), inner),
         _rule(width, "mid"),
         _metric("CPU", cpu_percent, inner),
         _line("Load avg", _load(load), inner),
-        _rule(width, "bottom"),
-    ])
+    ]
+    cores = core_percents or []
+    if cores:
+        lines.append(_rule(width, "mid"))
+        lines.append(_text(style("Cores", "bold"), inner))
+        lines.extend(_cpu_core_lines(cores, inner))
+    lines.append(_rule(width, "bottom"))
+    return "\n".join(lines)
+
+
+def _cpu_core_lines(core_percents: list[float], inner: int) -> list[str]:
+    lines = []
+    columns = 2 if inner >= 86 else 1
+    rows = (len(core_percents) + columns - 1) // columns
+    cell_width = max(30, inner // columns - 1)
+
+    def _cell(index: int, value: float) -> str:
+        label = f"Core {index:<2}"
+        return f"{style(label, 'cyan')} {_bar(value, 12)} {_percent(value):>7}"
+
+    for row in range(rows):
+        cells = []
+        for col in range(columns):
+            index = row + col * rows
+            if index >= len(core_percents):
+                continue
+            cell = _cell(index, core_percents[index])
+            padding = max(cell_width - _visible_len(cell), 1)
+            cells.append(cell + " " * padding)
+        lines.append(_text(" ".join(cells).rstrip(), inner))
+    return lines
 
 
 def render_memory(memory: dict) -> str:

@@ -14,6 +14,7 @@ except ImportError:
 COMMANDS: list[tuple[str, str]] = [
     ("/stat",           "Snapshot / history  [all|cpu|memory|…] [period]"),
     ("/watch",          "Real-time watch  [all|cpu|memory|…] [sec]"),
+    ("/cpu",            "CPU snapshot with per-core usage"),
     ("/collect",        "Collector  list·set·remove"),
     ("/top",            "Process TOP  [count]"),
     ("/service",        "Service status  <name>"),
@@ -84,7 +85,7 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
 }
 
 NO_ARG_COMMANDS = {
-    "/stat", "/watch", "/collect", "/service", "/top",
+    "/stat", "/watch", "/cpu", "/collect", "/service", "/top",
     "/clear", "/help", "/exit",
     # subcommands that take no further args — Enter immediately submits.
     "/log list", "/log help",

@@ -66,6 +66,7 @@ from monix.tools.system import (
     container_inspect,
     container_processes,
     container_stats,
+    cpu_core_usage_percents,
     cpu_usage_percent,
     disk_info,
     disk_io,
@@ -79,7 +80,7 @@ from monix.tools.system import (
 )
 
 HELP = """Commands:
-  /cpu                             CPU usage + load average
+  /cpu                             CPU usage + load average + cores
   /memory                          Memory usage
   /disk                            Disk usage
   /swap                            Swap usage
@@ -536,6 +537,9 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
             return _WATCH_HELP
         interval, metric = _watch_args(args)
         return watch(interval, settings, metric or None)
+    if command in {"/cpu", "/memory", "/disk", "/swap", "/net", "/io"}:
+        metric = command.removeprefix("/")
+        return _stat_single(metric, settings)
     if command == "/top":
         if not args or args[0] == "help":
             return (
@@ -615,7 +619,7 @@ _METRICS = {"cpu", "memory", "mem", "disk", "swap", "net", "network", "io"}
 _STAT_HELP = (
     "Available metrics:\n"
     "  /stat all              Current full snapshot\n"
-    "  /stat cpu              CPU + Load avg\n"
+    "  /stat cpu              CPU + Load avg + per-core usage\n"
     "  /stat memory           Memory\n"
     "  /stat disk             Disk\n"
     "  /stat swap             Swap\n"
@@ -632,7 +636,7 @@ _STAT_HELP = (
 _WATCH_HELP = (
     "Available metrics:\n"
     "  /watch all             Real-time full dashboard\n"
-    "  /watch cpu             Real-time CPU\n"
+    "  /watch cpu             Real-time CPU + per-core usage\n"
     "  /watch memory          Real-time memory\n"
     "  /watch disk            Real-time disk\n"
     "  /watch swap            Real-time swap\n"
@@ -707,7 +711,7 @@ def stat(settings: Settings | None = None, metric: str | None = None, period: st
 
 def _stat_all(settings: Settings) -> str:
     return "\n".join([
-        render_cpu(cpu_usage_percent(), load_average()),
+        render_cpu(cpu_usage_percent(), load_average(), cpu_core_usage_percents()),
         render_memory(memory_info()),
         render_disk(disk_info()),
         render_swap(swap_info()),
@@ -719,7 +723,7 @@ def _stat_all(settings: Settings) -> str:
 def _stat_single(metric: str, settings: Settings) -> str:
     m = metric.lower()
     if m == "cpu":
-        return render_cpu(cpu_usage_percent(), load_average())
+        return render_cpu(cpu_usage_percent(), load_average(), cpu_core_usage_percents())
     if m in ("mem", "memory"):
         return render_memory(memory_info())
     if m == "disk":

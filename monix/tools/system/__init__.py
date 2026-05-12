@@ -1,4 +1,4 @@
-from monix.tools.system.cpu import cpu_usage_percent
+from monix.tools.system.cpu import cpu_core_usage_percents, cpu_usage_percent
 from monix.tools.system.disk import disk_info
 from monix.tools.system.disk_io import disk_io
 from monix.tools.system.docker_stats import container_inspect, container_processes, container_stats
@@ -22,6 +22,7 @@ __all__ = [
     "container_inspect",
     "container_processes",
     "container_stats",
+    "cpu_core_usage_percents",
     "cpu_usage_percent",
     "disk_info",
     "disk_io",

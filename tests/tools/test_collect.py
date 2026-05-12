@@ -8,6 +8,7 @@ from monix.tools.collect import collect_and_save, load_history, metrics_path, pr
 def test_collect_and_save_appends_to_metrics_jsonl(tmp_path):
     with (
         patch("monix.tools.system.cpu_usage_percent", return_value=12.3),
+        patch("monix.tools.system.cpu_core_usage_percents", return_value=[10.0, 20.0]),
         patch("monix.tools.system.load_average", return_value=(1.0, 2.0, 3.0)),
         patch("monix.tools.system.memory_info", return_value={"percent": 45.6}),
         patch("monix.tools.system.disk_info", return_value=[{"path": "/", "percent": 70.0}]),
@@ -23,6 +24,7 @@ def test_collect_and_save_appends_to_metrics_jsonl(tmp_path):
     lines = metrics_path(str(tmp_path)).read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
     assert json.loads(lines[0])["cpu_percent"] == 12.3
+    assert json.loads(lines[0])["cpu_cores"] == [10.0, 20.0]
 
 
 def test_load_history_reads_jsonl_period(tmp_path):

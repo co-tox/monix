@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from monix.config import Settings
-from monix.tools.system.cpu import cpu_usage_percent
+from monix.tools.system.cpu import cpu_core_usage_percents, cpu_usage_percent
 from monix.tools.system.disk import disk_info
 from monix.tools.system.memory import memory_info
 from monix.tools.system.processes import top_processes
@@ -25,6 +25,7 @@ def collect_snapshot(settings: Settings | None = None) -> dict:
         "uptime": human_duration(uptime_seconds) if uptime_seconds is not None else "unknown",
         "load_average": load_average(),
         "cpu_percent": cpu_usage_percent(is_linux=is_linux),
+        "cpu_cores": cpu_core_usage_percents(is_linux=is_linux),
         "memory": memory_info(is_linux=is_linux),
         "disks": disk_info(),
         "top_processes": top_processes(limit=5),
