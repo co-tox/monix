@@ -75,9 +75,34 @@ export MONIX_MEM_WARN=80
 export MONIX_DISK_WARN=85
 ```
 
+## 5. Optional Webhook Notifications
+
+Configure Discord or Slack incoming webhooks to send Monix alert payloads. The `/notify` command can verify delivery without waiting for a real threshold breach:
+
+```bash
+export MONIX_DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
+export MONIX_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+export MONIX_NOTIFY_COOLDOWN=3600
+
+monix /notify test discord
+monix /notify test slack
+monix /notify status
+```
+
+Per-metric toggles default to enabled. Set a value to `0`, `false`, or `no` to disable that metric:
+
+```bash
+export MONIX_NOTIFY_CPU=1
+export MONIX_NOTIFY_MEM=1
+export MONIX_NOTIFY_DISK=1
+```
+
+Cooldown state is stored in `~/.monix/notify_state.json` for the service user.
+
 ## Operational Notes
 
 - Monix is read-only by design.
 - `/service` requires `systemctl`; on non-systemd hosts it reports that service status is unavailable.
 - `/logs` can only read files permitted for the current user. Use a monitoring user with the minimum log read permissions needed.
+- `/notify test` sends an outbound HTTP request to the configured Discord or Slack webhook.
 - Claude analysis sends the current snapshot JSON to Anthropic when `ANTHROPIC_API_KEY` is configured.

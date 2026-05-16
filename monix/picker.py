@@ -20,6 +20,7 @@ COMMANDS: list[tuple[str, str]] = [
     ("/service",        "Service status  <name>"),
     ("/docker",         "Docker  ps·stats·top·inspect·logs"),
     ("/log",            "Log management  add·list·@alias·--live"),
+    ("/notify",         "Webhook alerts  test·status"),
     ("/clear",          "Clear history"),
     ("/help",           "Help"),
     ("/exit",           "Exit"),
@@ -55,6 +56,20 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("remove",   "@alias  Unregister alias"),
         ("help",     "Show /docker usage details"),
     ],
+    "/notify": [
+        ("set",           "Show stored settings"),
+        ("set discord",   "<url|off>  Discord webhook URL"),
+        ("set slack",     "<url|off>  Slack webhook URL"),
+        ("set cpu",       "on|off  CPU alert toggle"),
+        ("set memory",    "on|off  Memory alert toggle"),
+        ("set disk",      "on|off  Disk alert toggle"),
+        ("set cooldown",  "<seconds>  Alert cooldown"),
+        ("set reset",     "Clear all stored settings"),
+        ("test discord",  "Send a test alert to Discord"),
+        ("test slack",    "Send a test alert to Slack"),
+        ("status",        "Show effective webhook config"),
+        ("help",          "Show /notify usage details"),
+    ],
     "/top": [
         ("cpu",     "[N]  Top N by CPU usage"),
         ("memory",  "[N]  Top N by memory usage"),
@@ -86,12 +101,14 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
 
 NO_ARG_COMMANDS = {
     "/stat", "/watch", "/cpu", "/collect", "/service", "/top",
-    "/clear", "/help", "/exit",
+    "/clear", "/help", "/exit", "/notify",
     # subcommands that take no further args — Enter immediately submits.
     "/log list", "/log help",
     "/stat help", "/watch help",
     "/top help", "/collect list", "/collect help",
     "/docker ps", "/docker list", "/docker stats", "/docker help",
+    "/notify set", "/notify set reset", "/notify status", "/notify help",
+    "/notify test discord", "/notify test slack",
 }
 
 # Fixed height = max(top-level, longest subcommand list) so subcommand views
@@ -330,6 +347,16 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
                 elif not query_buf:
                     _clear()
                     return None
+
+            # ── Tab → Autocomplete ────────────────────────────────────
+            elif b == b"\x09":
+                items = _items()
+                if items:
+                    completed = items[idx][0].lstrip("/")
+                    query_buf.clear()
+                    query_buf.extend(list(completed))
+                    q_cursor = len(query_buf)
+                    idx = 0
 
             # ── Normal Characters (UTF-8) ────────────────────────────
             else:

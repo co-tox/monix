@@ -128,6 +128,9 @@ HELP = """Commands:
   /docker help                     Show /docker usage details
 
   /logs <path> [lines]             Direct log view
+  /notify test [discord|slack]     Send test alert to webhook
+  /notify status                   Show webhook configuration and last sent time
+  /notify help                     Show /notify usage details
   /ask <question>                  Ask Gemini (requires GEMINI_API_KEY)
   /clear                           Clear conversation history
   /help                            Show this help
@@ -571,6 +574,8 @@ def dispatch_command(raw: str, settings: Settings | None = None, history: list[d
         return render_service(svc)
     if command == "/collect":
         return _dispatch_collect(args)
+    if command == "/notify":
+        return _dispatch_notify(args, settings)
     return f"Unknown command: {command}\nType /help to see available commands."
 
 
@@ -1505,6 +1510,187 @@ def _dispatch_collect(args: list[str]) -> str:
         return "Collector configuration removed."
 
     return f"Unknown subcommand: {sub}\nType /collect to see available commands."
+
+
+def _dispatch_notify(args: list[str], settings: Settings) -> str:
+    # Reload to pick up any changes made via /notify set
+    settings = Settings.from_env()
+
+    if not args or args[0] in ("help", "--help"):
+        return (
+            "Notify commands:\n"
+            "  /notify set [discord|slack|cpu|memory|disk|cooldown] <value>\n"
+            "                                 Configure webhook settings (stored in ~/.monix/notify_config.json)\n"
+            "  /notify test [discord|slack]   Send a test alert to the specified webhook (both if omitted)\n"
+            "  /notify status                 Show effective webhook configuration and last sent times\n"
+            "\n"
+            "Environment variables (overridden by /notify set):\n"
+            "  MONIX_DISCORD_WEBHOOK=<url>    Discord webhook URL\n"
+            "  MONIX_SLACK_WEBHOOK=<url>      Slack webhook URL\n"
+            "  MONIX_NOTIFY_COOLDOWN=3600     Seconds between repeated alerts (default: 1h)\n"
+            "  MONIX_NOTIFY_CPU=1             Send CPU alerts (0 to disable)\n"
+            "  MONIX_NOTIFY_MEM=1             Send memory alerts (0 to disable)\n"
+            "  MONIX_NOTIFY_DISK=1            Send disk alerts (0 to disable)"
+        )
+
+    sub = args[0]
+
+    if sub == "set":
+        return _dispatch_notify_set(args[1:])
+
+    if sub == "test":
+        target = args[1] if len(args) > 1 else "all"
+        return _notify_test(target, settings)
+
+    if sub == "status":
+        return _notify_status(settings)
+
+    return f"Unknown /notify subcommand: {sub}\nType /notify help to see available commands."
+
+
+def _dispatch_notify_set(args: list[str]) -> str:
+    from monix.tools.notify.config_store import load_notify_config, set_notify_field, reset_notify_config
+
+    if not args:
+        cfg = load_notify_config()
+        if not cfg:
+            return (
+                "No settings configured via /notify set.\n"
+                "Using environment variables only.\n\n"
+                "Usage:\n"
+                "  /notify set discord <url|off>       Set/unset Discord webhook URL\n"
+                "  /notify set slack <url|off>         Set/unset Slack webhook URL\n"
+                "  /notify set cpu on|off              Toggle CPU alerts\n"
+                "  /notify set memory on|off           Toggle memory alerts\n"
+                "  /notify set disk on|off             Toggle disk alerts\n"
+                "  /notify set cooldown <seconds>      Set cooldown (default: 3600)\n"
+                "  /notify set reset                   Clear all stored settings"
+            )
+        lines = ["Stored notify settings (override env vars):"]
+        if "discord_url" in cfg:
+            url = cfg["discord_url"]
+            lines.append(f"  discord:  {url[:40] + '...' if url and len(url) > 40 else url or 'off'}")
+        if "slack_url" in cfg:
+            url = cfg["slack_url"]
+            lines.append(f"  slack:    {url[:40] + '...' if url and len(url) > 40 else url or 'off'}")
+        if "cooldown" in cfg:
+            lines.append(f"  cooldown: {cfg['cooldown']}s")
+        if "cpu" in cfg:
+            lines.append(f"  cpu:      {'on' if cfg['cpu'] else 'off'}")
+        if "memory" in cfg:
+            lines.append(f"  memory:   {'on' if cfg['memory'] else 'off'}")
+        if "disk" in cfg:
+            lines.append(f"  disk:     {'on' if cfg['disk'] else 'off'}")
+        lines.append("\nRun /notify status to see the effective (merged) configuration.")
+        return "\n".join(lines)
+
+    sub = args[0]
+
+    if sub == "reset":
+        reset_notify_config()
+        return "All stored /notify set settings cleared. Environment variables will be used."
+
+    if sub in ("discord", "slack"):
+        if len(args) < 2:
+            return f"Usage: /notify set {sub} <url|off>"
+        val = args[1]
+        key = "discord_url" if sub == "discord" else "slack_url"
+        if val.lower() == "off":
+            set_notify_field(key, None)
+            return f"{sub.title()} webhook URL cleared."
+        set_notify_field(key, val)
+        return f"{sub.title()} webhook URL saved. Run /notify test {sub} to verify."
+
+    if sub in ("cpu", "memory", "disk"):
+        if len(args) < 2 or args[1].lower() not in ("on", "off"):
+            return f"Usage: /notify set {sub} on|off"
+        enabled = args[1].lower() == "on"
+        set_notify_field(sub, enabled)
+        return f"{sub.title()} alerts {'enabled' if enabled else 'disabled'}."
+
+    if sub == "cooldown":
+        if len(args) < 2:
+            return "Usage: /notify set cooldown <seconds>"
+        try:
+            secs = int(args[1])
+        except ValueError:
+            return f"Invalid cooldown value: {args[1]!r}  (must be an integer)"
+        if secs < 0:
+            return "Cooldown must be 0 or greater."
+        set_notify_field("cooldown", secs)
+        return f"Cooldown set to {secs}s."
+
+    return (
+        f"Unknown setting: {sub!r}\n"
+        "Available: discord, slack, cpu, memory, disk, cooldown, reset"
+    )
+
+
+def _notify_test(target: str, settings: Settings) -> str:
+    from monix.tools.notify import send_alert, NotifyConfig, AlertFilter
+
+    if target not in ("discord", "slack", "all"):
+        return f"Unknown target: {target}\nUsage: /notify test [discord|slack]"
+
+    config = NotifyConfig(
+        discord_url=settings.discord_webhook if target in ("discord", "all") else None,
+        slack_url=settings.slack_webhook if target in ("slack", "all") else None,
+        cooldown_seconds=0,
+        alert_filter=AlertFilter(cpu=True, memory=True, disk=True),
+    )
+
+    if not config.get("discord_url") and not config.get("slack_url"):
+        return (
+            "No webhook URL configured for the selected target.\n"
+            "Set MONIX_DISCORD_WEBHOOK or MONIX_SLACK_WEBHOOK in your environment."
+        )
+
+    import platform as _platform
+    host = _platform.node() or "unknown"
+    test_alerts = ["CPU usage is high: 91.0% >= 85.0% (test message)"]
+
+    failed = send_alert(test_alerts, host, config)
+    if not failed:
+        sent = []
+        if config.get("discord_url"):
+            sent.append("Discord")
+        if config.get("slack_url"):
+            sent.append("Slack")
+        return f"Test alert sent to: {', '.join(sent)}"
+    return f"Webhook delivery failed: {', '.join(failed)}"
+
+
+def _notify_status(settings: Settings) -> str:
+    from monix.tools.notify.webhook import _post_json as _  # noqa: F401 — ensure module loads
+    from pathlib import Path
+    import json
+
+    state_path = Path.home() / ".monix" / "notify_state.json"
+    try:
+        state: dict = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        state = {}
+
+    def _fmt_url(url: str | None) -> str:
+        if not url:
+            return "not set"
+        return url[:40] + "..." if len(url) > 40 else url
+
+    lines = [
+        "Notify configuration",
+        f"  Discord webhook: {_fmt_url(settings.discord_webhook)}",
+        f"  Slack webhook:   {_fmt_url(settings.slack_webhook)}",
+        f"  Cooldown:        {settings.notify_cooldown}s",
+        f"  CPU alerts:      {'on' if settings.notify_cpu else 'off'}",
+        f"  Memory alerts:   {'on' if settings.notify_mem else 'off'}",
+        f"  Disk alerts:     {'on' if settings.notify_disk else 'off'}",
+    ]
+    if state:
+        lines.append(f"  Last sent state: {state_path}")
+        lines.append(f"  Tracked keys:    {len(state)}")
+    else:
+        lines.append("  Last sent state: (no alerts sent yet)")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

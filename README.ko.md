@@ -6,7 +6,7 @@
 <img width="800" height="450" alt="Image" src="https://github.com/user-attachments/assets/e49b62f6-fdd6-4e33-b30d-987be4c2696b" />
 
 
-Monix는 서버 모니터링을 위한 터미널 네이티브 **읽기 전용** AI 어시스턴트입니다. 슬래시 커맨드 CLI와 Gemini 기반 대화형 에이전트를 결합하여, 운영자가 셸을 떠나지 않고 — 그리고 어떠한 파괴적 명령도 실행하지 않고 — CPU, 메모리, 디스크, 프로세스, 서비스, 로그(일반 파일, Nginx, Docker)를 점검할 수 있게 합니다.
+Monix는 서버 모니터링을 위한 터미널 네이티브 **읽기 전용** AI 어시스턴트입니다. 슬래시 커맨드 CLI와 Gemini 기반 대화형 에이전트를 결합하여, 운영자가 셸을 떠나지 않고 — 그리고 어떠한 파괴적 명령도 실행하지 않고 — CPU, 메모리, 디스크, 프로세스, 서비스, 로그(일반 파일, Nginx, Docker), 웹훅 알림을 점검할 수 있게 합니다.
 
 - **두 개의 인터페이스, 하나의 멘탈 모델** — 알려진 의도에는 빠른 `/슬래시` 명령을, 그 외에는 자연어 채팅을 사용합니다. 둘 다 동일한 기반 도구를 공유합니다.
 - **런타임 의존성 0** — 표준 라이브러리만 사용 (`urllib`, `json`, `inspect`, `subprocess`, …).
@@ -108,6 +108,14 @@ uv run monix-mcp
 | `/docker logs\|search\|live <name>` | 직접 호출 (별칭 없이) |
 | `/docker remove @alias` | 등록 해제 |
 
+### 알림
+
+| 명령어 | 용도 |
+| --- | --- |
+| `/notify test [discord\|slack]` | 설정된 웹훅으로 테스트 알림 발송. 대상 생략 시 둘 다 발송 |
+| `/notify status` | 웹훅 설정, 쿨다운, 메트릭별 토글, 마지막 발송 상태 표시 |
+| `/notify help` | 알림 명령어와 환경변수 레퍼런스 표시 |
+
 ### 서비스 및 AI
 
 | 명령어 | 용도 |
@@ -125,6 +133,21 @@ uv run monix-mcp
 | `/collect set <interval> <retention> <folder>` | 주기적 스냅샷 수집 시작 (예: `1h 30d ./metrics`) |
 | `/collect list` | 설정 및 실행 상태 표시 |
 | `/collect remove` | 비활성화 및 설정 삭제 |
+
+### 웹훅 알림 설정
+
+Monix는 임계치 알림을 Discord와 Slack 웹훅 포맷으로 만들 수 있습니다. 동일한 알림의 반복 발송은 `~/.monix/notify_state.json` 상태 파일을 기준으로 제한됩니다.
+
+```bash
+export MONIX_DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
+export MONIX_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+export MONIX_NOTIFY_COOLDOWN=3600
+
+# 메트릭별 알림 토글. 0, false, no로 비활성화합니다.
+export MONIX_NOTIFY_CPU=1
+export MONIX_NOTIFY_MEM=1
+export MONIX_NOTIFY_DISK=1
+```
 
 ---
 

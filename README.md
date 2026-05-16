@@ -6,7 +6,7 @@
 <img width="800" height="450" alt="Image" src="https://github.com/user-attachments/assets/e49b62f6-fdd6-4e33-b30d-987be4c2696b" />
 
 
-Monix is a terminal-native, **read-only** AI assistant for server monitoring. It pairs a slash-command CLI with a Gemini-backed conversational agent so operators can inspect CPU, memory, disk, processes, services, and logs (plain files, Nginx, Docker) without leaving the shell — and without ever issuing destructive commands.
+Monix is a terminal-native, **read-only** AI assistant for server monitoring. It pairs a slash-command CLI with a Gemini-backed conversational agent so operators can inspect CPU, memory, disk, processes, services, logs (plain files, Nginx, Docker), and webhook alerts without leaving the shell — and without ever issuing destructive commands.
 
 - **Two interfaces, one mental model** — fast `/slash` commands for known intents, natural-language chat for everything else. Both share the same underlying tools.
 - **Zero runtime dependencies** — standard library only (`urllib`, `json`, `inspect`, `subprocess`, …).
@@ -108,6 +108,14 @@ uv run monix-mcp
 | `/docker logs\|search\|live <name>` | Direct (no alias) |
 | `/docker remove @alias` | Unregister |
 
+### Notifications
+
+| Command | Purpose |
+| --- | --- |
+| `/notify test [discord\|slack]` | Send a test alert to the configured webhook; sends to both if omitted |
+| `/notify status` | Show webhook configuration, cooldown, metric toggles, and last sent state |
+| `/notify help` | Show notification command and environment variable reference |
+
 ### Services and AI
 
 | Command | Purpose |
@@ -125,6 +133,21 @@ uv run monix-mcp
 | `/collect set <interval> <retention> <folder>` | Start periodic snapshot collection (e.g. `1h 30d ./metrics`) |
 | `/collect list` | Show config and run state |
 | `/collect remove` | Disable and delete config |
+
+### Webhook alert configuration
+
+Monix can format threshold alerts for Discord and Slack webhooks. Repeated identical alerts are rate-limited with a local state file at `~/.monix/notify_state.json`.
+
+```bash
+export MONIX_DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
+export MONIX_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+export MONIX_NOTIFY_COOLDOWN=3600
+
+# Per-metric notification toggles. Use 0, false, or no to disable.
+export MONIX_NOTIFY_CPU=1
+export MONIX_NOTIFY_MEM=1
+export MONIX_NOTIFY_DISK=1
+```
 
 ---
 
