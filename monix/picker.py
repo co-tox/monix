@@ -348,6 +348,16 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
                     _clear()
                     return None
 
+            # ── Tab → Autocomplete ────────────────────────────────────
+            elif b == b"\x09":
+                items = _items()
+                if items:
+                    completed = items[idx][0].lstrip("/")
+                    query_buf.clear()
+                    query_buf.extend(list(completed))
+                    q_cursor = len(query_buf)
+                    idx = 0
+
             # ── Normal Characters (UTF-8) ────────────────────────────
             else:
                 pending.extend(b)
