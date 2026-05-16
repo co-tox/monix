@@ -57,18 +57,20 @@ class Settings:
     def from_env(cls) -> "Settings":
         import platform as _platform
         from monix.config.keystore import load_api_key
+        from monix.tools.notify.config_store import load_notify_config
+        _ncfg = load_notify_config()
         return cls(
             gemini_api_key=os.getenv("GEMINI_API_KEY") or load_api_key(),
             model=os.getenv("MONIX_MODEL", "gemini-2.5-flash"),
             log_file=default_log_file(),
             thresholds=Thresholds.from_env(),
             platform=_resolve_platform(os.getenv("MONIX_PLATFORM", _platform.system())),
-            discord_webhook=os.getenv("MONIX_DISCORD_WEBHOOK") or None,
-            slack_webhook=os.getenv("MONIX_SLACK_WEBHOOK") or None,
-            notify_cooldown=int(_env_float("MONIX_NOTIFY_COOLDOWN", 3600.0)),
-            notify_cpu=_env_bool("MONIX_NOTIFY_CPU"),
-            notify_mem=_env_bool("MONIX_NOTIFY_MEM"),
-            notify_disk=_env_bool("MONIX_NOTIFY_DISK"),
+            discord_webhook=_ncfg.get("discord_url") or os.getenv("MONIX_DISCORD_WEBHOOK") or None,
+            slack_webhook=_ncfg.get("slack_url") or os.getenv("MONIX_SLACK_WEBHOOK") or None,
+            notify_cooldown=_ncfg.get("cooldown", int(_env_float("MONIX_NOTIFY_COOLDOWN", 3600.0))),
+            notify_cpu=_ncfg.get("cpu", _env_bool("MONIX_NOTIFY_CPU")),
+            notify_mem=_ncfg.get("memory", _env_bool("MONIX_NOTIFY_MEM")),
+            notify_disk=_ncfg.get("disk", _env_bool("MONIX_NOTIFY_DISK")),
         )
 
     @property

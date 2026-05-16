@@ -1513,13 +1513,18 @@ def _dispatch_collect(args: list[str]) -> str:
 
 
 def _dispatch_notify(args: list[str], settings: Settings) -> str:
+    # Reload to pick up any changes made via /notify set
+    settings = Settings.from_env()
+
     if not args or args[0] in ("help", "--help"):
         return (
             "Notify commands:\n"
+            "  /notify set [discord|slack|cpu|memory|disk|cooldown] <value>\n"
+            "                                 Configure webhook settings (stored in ~/.monix/notify_config.json)\n"
             "  /notify test [discord|slack]   Send a test alert to the specified webhook (both if omitted)\n"
-            "  /notify status                 Show webhook configuration and last sent times\n"
+            "  /notify status                 Show effective webhook configuration and last sent times\n"
             "\n"
-            "Environment variables:\n"
+            "Environment variables (overridden by /notify set):\n"
             "  MONIX_DISCORD_WEBHOOK=<url>    Discord webhook URL\n"
             "  MONIX_SLACK_WEBHOOK=<url>      Slack webhook URL\n"
             "  MONIX_NOTIFY_COOLDOWN=3600     Seconds between repeated alerts (default: 1h)\n"
@@ -1530,6 +1535,9 @@ def _dispatch_notify(args: list[str], settings: Settings) -> str:
 
     sub = args[0]
 
+    if sub == "set":
+        return _dispatch_notify_set(args[1:])
+
     if sub == "test":
         target = args[1] if len(args) > 1 else "all"
         return _notify_test(target, settings)
@@ -1538,6 +1546,84 @@ def _dispatch_notify(args: list[str], settings: Settings) -> str:
         return _notify_status(settings)
 
     return f"Unknown /notify subcommand: {sub}\nType /notify help to see available commands."
+
+
+def _dispatch_notify_set(args: list[str]) -> str:
+    from monix.tools.notify.config_store import load_notify_config, set_notify_field, reset_notify_config
+
+    if not args:
+        cfg = load_notify_config()
+        if not cfg:
+            return (
+                "No settings configured via /notify set.\n"
+                "Using environment variables only.\n\n"
+                "Usage:\n"
+                "  /notify set discord <url|off>       Set/unset Discord webhook URL\n"
+                "  /notify set slack <url|off>         Set/unset Slack webhook URL\n"
+                "  /notify set cpu on|off              Toggle CPU alerts\n"
+                "  /notify set memory on|off           Toggle memory alerts\n"
+                "  /notify set disk on|off             Toggle disk alerts\n"
+                "  /notify set cooldown <seconds>      Set cooldown (default: 3600)\n"
+                "  /notify set reset                   Clear all stored settings"
+            )
+        lines = ["Stored notify settings (override env vars):"]
+        if "discord_url" in cfg:
+            url = cfg["discord_url"]
+            lines.append(f"  discord:  {url[:40] + '...' if url and len(url) > 40 else url or 'off'}")
+        if "slack_url" in cfg:
+            url = cfg["slack_url"]
+            lines.append(f"  slack:    {url[:40] + '...' if url and len(url) > 40 else url or 'off'}")
+        if "cooldown" in cfg:
+            lines.append(f"  cooldown: {cfg['cooldown']}s")
+        if "cpu" in cfg:
+            lines.append(f"  cpu:      {'on' if cfg['cpu'] else 'off'}")
+        if "memory" in cfg:
+            lines.append(f"  memory:   {'on' if cfg['memory'] else 'off'}")
+        if "disk" in cfg:
+            lines.append(f"  disk:     {'on' if cfg['disk'] else 'off'}")
+        lines.append("\nRun /notify status to see the effective (merged) configuration.")
+        return "\n".join(lines)
+
+    sub = args[0]
+
+    if sub == "reset":
+        reset_notify_config()
+        return "All stored /notify set settings cleared. Environment variables will be used."
+
+    if sub in ("discord", "slack"):
+        if len(args) < 2:
+            return f"Usage: /notify set {sub} <url|off>"
+        val = args[1]
+        key = "discord_url" if sub == "discord" else "slack_url"
+        if val.lower() == "off":
+            set_notify_field(key, None)
+            return f"{sub.title()} webhook URL cleared."
+        set_notify_field(key, val)
+        return f"{sub.title()} webhook URL saved. Run /notify test {sub} to verify."
+
+    if sub in ("cpu", "memory", "disk"):
+        if len(args) < 2 or args[1].lower() not in ("on", "off"):
+            return f"Usage: /notify set {sub} on|off"
+        enabled = args[1].lower() == "on"
+        set_notify_field(sub, enabled)
+        return f"{sub.title()} alerts {'enabled' if enabled else 'disabled'}."
+
+    if sub == "cooldown":
+        if len(args) < 2:
+            return "Usage: /notify set cooldown <seconds>"
+        try:
+            secs = int(args[1])
+        except ValueError:
+            return f"Invalid cooldown value: {args[1]!r}  (must be an integer)"
+        if secs < 0:
+            return "Cooldown must be 0 or greater."
+        set_notify_field("cooldown", secs)
+        return f"Cooldown set to {secs}s."
+
+    return (
+        f"Unknown setting: {sub!r}\n"
+        "Available: discord, slack, cpu, memory, disk, cooldown, reset"
+    )
 
 
 def _notify_test(target: str, settings: Settings) -> str:

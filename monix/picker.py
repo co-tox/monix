@@ -57,9 +57,17 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("help",     "Show /docker usage details"),
     ],
     "/notify": [
+        ("set",           "Show stored settings"),
+        ("set discord",   "<url|off>  Discord webhook URL"),
+        ("set slack",     "<url|off>  Slack webhook URL"),
+        ("set cpu",       "on|off  CPU alert toggle"),
+        ("set memory",    "on|off  Memory alert toggle"),
+        ("set disk",      "on|off  Disk alert toggle"),
+        ("set cooldown",  "<seconds>  Alert cooldown"),
+        ("set reset",     "Clear all stored settings"),
         ("test discord",  "Send a test alert to Discord"),
         ("test slack",    "Send a test alert to Slack"),
-        ("status",        "Show webhook config and last sent times"),
+        ("status",        "Show effective webhook config"),
         ("help",          "Show /notify usage details"),
     ],
     "/top": [
@@ -99,7 +107,7 @@ NO_ARG_COMMANDS = {
     "/stat help", "/watch help",
     "/top help", "/collect list", "/collect help",
     "/docker ps", "/docker list", "/docker stats", "/docker help",
-    "/notify status", "/notify help",
+    "/notify set", "/notify set reset", "/notify status", "/notify help",
     "/notify test discord", "/notify test slack",
 }
 
