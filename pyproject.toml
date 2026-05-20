@@ -4,13 +4,35 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "monix"
-version = "0.1.0"
+version = "0.2.2"
 description = "Gemini-powered terminal assistant for server monitoring"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [{ name = "Monix" }]
-license = { text = "MIT" }
+license = "MIT"
+keywords = ["monitoring", "terminal", "cli", "gemini", "ai", "server", "devops"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Terminals",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/co-tox/monix"
+Repository = "https://github.com/co-tox/monix"
+"Bug Tracker" = "https://github.com/co-tox/monix/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

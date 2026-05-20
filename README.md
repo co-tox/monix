@@ -14,38 +14,100 @@ Monix is a terminal-native, **read-only** AI assistant for server monitoring. It
 
 ---
 
-## Quick Start
+## Installation
 
-### Install
+### macOS
 
 ```bash
-uv venv
-uv pip install -e ".[dev]"
+pip install monix
 ```
 
-### Launch the interactive REPL
+### Ubuntu / Debian
 
 ```bash
-uv run monix
+sudo apt install pipx && pipx install monix && pipx ensurepath && source ~/.bashrc
 ```
 
-On first launch, Monix prompts for a Gemini API key (paste-friendly, hidden input). Skip with Enter to run in local-only mode.
-
-### One-shot mode
+### With MCP server support
 
 ```bash
-uv run monix /stat cpu
-uv run monix /log /var/log/syslog 100
-uv run monix "why is memory so high?"
+pip install "monix[mcp]"
+# or
+pipx install "monix[mcp]"
+```
+
+---
+
+## Setup
+
+### 1. Get a Gemini API key
+
+Get a free key at [Google AI Studio](https://aistudio.google.com/app/apikey).
+
+### 2. Run monix
+
+```bash
+monix
+```
+
+On first launch, Monix prompts for your Gemini API key (input is hidden). The key is validated before saving — invalid keys are rejected. Once saved to `~/.monix/config.json`, you won't be asked again.
+
+### 3. One-shot mode
+
+```bash
+monix /stat cpu
+monix /log /var/log/syslog 100
+monix "why is memory so high?"
 ```
 
 ### MCP server
 
-The MCP server is optional and uses the same read-only tool registry as the CLI.
+```bash
+monix-mcp
+```
+
+---
+
+## Configuration
+
+### Change API key
 
 ```bash
-uv pip install -e ".[mcp]"
-uv run monix-mcp
+monix --setup
+```
+
+### Change platform (if auto-detection is wrong)
+
+```bash
+monix --set-platform
+```
+
+### Environment variables
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | Gemini API key (overrides saved key) | — |
+| `MONIX_MODEL` | Gemini model | `gemini-2.5-flash` |
+| `MONIX_LOG_FILE` | Default log file path | auto-detected |
+| `MONIX_CPU_WARN` | CPU alert threshold (%) | `85.0` |
+| `MONIX_MEM_WARN` | Memory alert threshold (%) | `85.0` |
+| `MONIX_DISK_WARN` | Disk alert threshold (%) | `90.0` |
+| `MONIX_DISCORD_WEBHOOK` | Discord webhook URL | — |
+| `MONIX_SLACK_WEBHOOK` | Slack webhook URL | — |
+| `MONIX_NOTIFY_COOLDOWN` | Alert cooldown (seconds) | `3600` |
+| `MONIX_NOTIFY_CPU` | CPU alerts (`0`/`false` to disable) | `1` |
+| `MONIX_NOTIFY_MEM` | Memory alerts | `1` |
+| `MONIX_NOTIFY_DISK` | Disk alerts | `1` |
+| `MONIX_PLATFORM` | Override platform (`linux`/`mac`) | auto |
+
+A `.env` file in the current directory is loaded automatically.
+
+### Webhook alerts (in-app)
+
+```
+/notify set discord https://discord.com/api/webhooks/...
+/notify set slack https://hooks.slack.com/services/...
+/notify status
 ```
 
 ---

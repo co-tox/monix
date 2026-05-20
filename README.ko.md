@@ -14,38 +14,100 @@ Monix는 서버 모니터링을 위한 터미널 네이티브 **읽기 전용** 
 
 ---
 
-## 빠른 시작
+## 설치
 
-### 설치
+### macOS
 
 ```bash
-uv venv
-uv pip install -e ".[dev]"
+pip install monix
 ```
 
-### 인터랙티브 REPL 실행
+### Ubuntu / Debian
 
 ```bash
-uv run monix
+sudo apt install pipx && pipx install monix && pipx ensurepath && source ~/.bashrc
 ```
 
-최초 실행 시 Monix가 Gemini API 키를 입력받습니다(붙여넣기 친화적, 입력 숨김 처리). Enter로 건너뛰면 로컬 전용 모드로 실행됩니다.
-
-### 원샷 모드
+### MCP 서버 지원 포함
 
 ```bash
-uv run monix /stat cpu
-uv run monix /log /var/log/syslog 100
-uv run monix "왜 메모리 사용량이 이렇게 높지?"
+pip install "monix[mcp]"
+# 또는
+pipx install "monix[mcp]"
+```
+
+---
+
+## 시작하기
+
+### 1. Gemini API 키 발급
+
+[Google AI Studio](https://aistudio.google.com/app/apikey)에서 무료로 발급받을 수 있습니다.
+
+### 2. monix 실행
+
+```bash
+monix
+```
+
+최초 실행 시 Gemini API 키를 입력받습니다(입력 숨김 처리). 키는 저장 전에 유효성 검사를 거치며, 유효하지 않은 키는 저장되지 않습니다. 한 번 저장되면 이후 다시 묻지 않습니다.
+
+### 3. 원샷 모드
+
+```bash
+monix /stat cpu
+monix /log /var/log/syslog 100
+monix "왜 메모리 사용량이 이렇게 높지?"
 ```
 
 ### MCP 서버
 
-MCP 서버는 선택 기능이며 CLI와 동일한 읽기 전용 도구 registry를 사용합니다.
+```bash
+monix-mcp
+```
+
+---
+
+## 설정
+
+### API 키 변경
 
 ```bash
-uv pip install -e ".[mcp]"
-uv run monix-mcp
+monix --setup
+```
+
+### 플랫폼 변경 (자동 감지가 틀렸을 때)
+
+```bash
+monix --set-platform
+```
+
+### 환경 변수
+
+| 변수 | 설명 | 기본값 |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | Gemini API 키 (저장된 키를 덮어씀) | — |
+| `MONIX_MODEL` | 사용할 Gemini 모델 | `gemini-2.5-flash` |
+| `MONIX_LOG_FILE` | 기본 로그 파일 경로 | 자동 탐지 |
+| `MONIX_CPU_WARN` | CPU 경고 임계값 (%) | `85.0` |
+| `MONIX_MEM_WARN` | 메모리 경고 임계값 (%) | `85.0` |
+| `MONIX_DISK_WARN` | 디스크 경고 임계값 (%) | `90.0` |
+| `MONIX_DISCORD_WEBHOOK` | Discord 웹훅 URL | — |
+| `MONIX_SLACK_WEBHOOK` | Slack 웹훅 URL | — |
+| `MONIX_NOTIFY_COOLDOWN` | 알림 쿨다운 (초) | `3600` |
+| `MONIX_NOTIFY_CPU` | CPU 알림 (`0`/`false`로 비활성화) | `1` |
+| `MONIX_NOTIFY_MEM` | 메모리 알림 | `1` |
+| `MONIX_NOTIFY_DISK` | 디스크 알림 | `1` |
+| `MONIX_PLATFORM` | 플랫폼 재정의 (`linux`/`mac`) | 자동 |
+
+현재 작업 디렉토리의 `.env` 파일은 자동으로 로드됩니다.
+
+### 웹훅 알림 (앱 내 설정)
+
+```
+/notify set discord https://discord.com/api/webhooks/...
+/notify set slack https://hooks.slack.com/services/...
+/notify status
 ```
 
 ---

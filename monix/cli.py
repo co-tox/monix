@@ -430,20 +430,54 @@ class Spinner:
             self.thread.join()
 
 
+def _prompt_platform_setup(settings: Settings) -> Settings:
+    from monix.config.keystore import save_platform
+    from monix.picker import pick_option
+
+    detected = settings.platform
+    default_idx = 1 if detected == "mac" else 0
+    options = [
+        ("Linux", "Ubuntu, Debian, RHEL, …"),
+        ("macOS", "Apple Silicon / Intel"),
+    ]
+    idx = pick_option(f"Select your platform  (auto-detected: {detected})", options, default=default_idx)
+    if idx is None:
+        return settings
+    platform_val = "mac" if idx == 1 else "linux"
+    save_platform(platform_val)
+    print(f"\n  ✓ Platform set to '{platform_val}'.\n")
+    return Settings(
+        gemini_api_key=settings.gemini_api_key,
+        model=settings.model,
+        log_file=settings.log_file,
+        thresholds=settings.thresholds,
+        platform=platform_val,
+        discord_webhook=settings.discord_webhook,
+        slack_webhook=settings.slack_webhook,
+        notify_cooldown=settings.notify_cooldown,
+        notify_cpu=settings.notify_cpu,
+        notify_mem=settings.notify_mem,
+        notify_disk=settings.notify_disk,
+    )
+
+
 def _prompt_api_key_setup(settings: Settings) -> Settings:
     import getpass
     from monix.config.keystore import save_api_key
     from monix.llm.gemini import GeminiClient
 
-    print("\n  Register Gemini API key to enable AI features.")
-    print("  Pasting is supported (input is hidden for security).")
-    print("  Press Enter to skip.\n")
+    print("\n  Gemini API key is required to use monix.")
+    print("  Get a free key at: https://aistudio.google.com/app/apikey")
+    print("  Pasting is supported (input is hidden for security).\n")
     for attempt in range(3):
         try:
             key = getpass.getpass("  Gemini API Key: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
+        except UnicodeDecodeError:
+            print("\r  ✗ Input encoding error. Please paste the key again.          ")
+            continue
         if not key:
             break
         print("  Validating key...", end="", flush=True)
@@ -457,6 +491,12 @@ def _prompt_api_key_setup(settings: Settings) -> Settings:
                 log_file=settings.log_file,
                 thresholds=settings.thresholds,
                 platform=settings.platform,
+                discord_webhook=settings.discord_webhook,
+                slack_webhook=settings.slack_webhook,
+                notify_cooldown=settings.notify_cooldown,
+                notify_cpu=settings.notify_cpu,
+                notify_mem=settings.notify_mem,
+                notify_disk=settings.notify_disk,
             )
         else:
             remaining = 2 - attempt
@@ -464,7 +504,7 @@ def _prompt_api_key_setup(settings: Settings) -> Settings:
             if remaining > 0:
                 msg += f" Try again. ({remaining} attempts left)"
             print(msg + "             ")
-    print("  Starting in Local monitor mode without AI features.\n")
+    print("\n  No API key set. Run monix again or set the GEMINI_API_KEY environment variable.\n")
     return settings
 
 
@@ -472,6 +512,8 @@ def repl(settings: Settings | None = None) -> int:
     settings = settings or Settings.from_env()
     if not settings.gemini_api_key:
         settings = _prompt_api_key_setup(settings)
+        if not settings.gemini_api_key:
+            return 1
     history: list[dict] = []
     cfg = load_collector_config()
     if cfg:
@@ -806,13 +848,18 @@ def main():
     parser.add_argument("command", nargs="?", help="Command to run")
     parser.add_argument("args", nargs="*", help="Arguments for the command")
     parser.add_argument("--version", action="version", version=f"monix {__version__}")
-    parser.add_argument("--setup", action="store_true", help="Run API key setup")
+    parser.add_argument("--setup", action="store_true", help="Run setup (platform + API key)")
+    parser.add_argument("--set-platform", action="store_true", help="Change platform setting")
 
     args = parser.parse_args()
     settings = Settings.from_env()
 
     if args.setup:
         _prompt_api_key_setup(settings)
+        return 0
+
+    if args.set_platform:
+        _prompt_platform_setup(settings)
         return 0
 
     if not args.command:

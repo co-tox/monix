@@ -388,6 +388,64 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
 
+def pick_option(title: str, options: list[tuple[str, str]], default: int = 0) -> int | None:
+    """Arrow key + Enter selector for a fixed list of options.
+
+    Returns the selected index, or None if cancelled.
+    Falls back to text input when not in a TTY.
+    """
+    if not _HAS_TTY or not sys.stdout.isatty():
+        return None
+
+    n = len(options)
+    idx = default
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+
+    def _draw(first: bool = False) -> None:
+        buf = []
+        if not first:
+            buf.append(f"\033[{n}A\r")
+        for i, (label, desc) in enumerate(options):
+            if i == idx:
+                buf.append(f"  \033[36m❯ \033[1m{label}\033[0m  \033[2m{desc}\033[0m\033[K\n")
+            else:
+                buf.append(f"  \033[2m  {label}  {desc}\033[0m\033[K\n")
+        sys.stdout.write("".join(buf))
+        sys.stdout.flush()
+
+    def _clear() -> None:
+        sys.stdout.write(f"\033[{n}A\r\033[J")
+        sys.stdout.flush()
+
+    try:
+        tty.setraw(fd)
+        sys.stdout.write(f"\n  {title}\n\n")
+        _draw(first=True)
+        while True:
+            b = sys.stdin.buffer.read(1)
+            if b == b"\x1b":
+                b2 = sys.stdin.buffer.read(1)
+                if b2 == b"[":
+                    b3 = sys.stdin.buffer.read(1)
+                    if b3 == b"A":
+                        idx = (idx - 1) % n
+                    elif b3 == b"B":
+                        idx = (idx + 1) % n
+                else:
+                    _clear()
+                    return None
+            elif b in (b"\r", b"\n"):
+                _clear()
+                return idx
+            elif b in (b"\x03", b"\x04"):
+                _clear()
+                return None
+            _draw()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+
+
 def pick() -> str | None:
     """Select command using arrow keys. Return None if cancelled."""
     if not _HAS_TTY or not sys.stdout.isatty():
