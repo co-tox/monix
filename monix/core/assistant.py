@@ -4,7 +4,7 @@ import json
 import textwrap
 
 from monix.config import Settings
-from monix.llm.gemini import GeminiClient
+from monix.llm.providers.factory import create_client_from_settings
 from monix.llm.types import LLMError
 from monix.render import render_docker_containers, render_log_search, render_logs, render_nginx_summary, render_service
 from monix.tools.calling import TOOL_DECLARATIONS, call_tool
@@ -32,7 +32,7 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
         question = " ".join(question)
     settings = settings or Settings.from_env()
     snapshot = collect_snapshot(settings)
-    client = GeminiClient(settings.gemini_api_key, settings.model)
+    client = create_client_from_settings(settings)
 
     if client.enabled:
         snapshot_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
@@ -111,7 +111,7 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
             return wrap(text or local_answer(question, snapshot))
 
         except LLMError as exc:
-            return wrap(f"Gemini API 오류: {exc.message}\n\n{local_answer(question, snapshot)}")
+            return wrap(f"LLM API 오류: {exc.message}\n\n{local_answer(question, snapshot)}")
 
     return wrap(local_answer(question, snapshot))
 

@@ -23,11 +23,31 @@ def save_api_key(key: str) -> None:
     _save({"gemini_api_key": key})
 
 
+def load_llm_provider() -> str | None:
+    return _load_value("llm_provider")
+
+
+def save_llm_provider(provider: str) -> None:
+    _save({"llm_provider": provider})
+
+
+def load_model() -> str | None:
+    return _load_value("model")
+
+
+def save_model(model: str) -> None:
+    _save({"model": model})
+
+
 def load_platform() -> str | None:
+    return _load_value("platform")
+
+
+def _load_value(key: str) -> str | None:
     if not _CONFIG_FILE.exists():
         return None
     try:
-        return json.loads(_CONFIG_FILE.read_text(encoding="utf-8")).get("platform") or None
+        return json.loads(_CONFIG_FILE.read_text(encoding="utf-8")).get(key) or None
     except (json.JSONDecodeError, OSError):
         return None
 

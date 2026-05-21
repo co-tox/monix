@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "monix"
 version = "0.2.2"
-description = "Gemini-powered terminal assistant for server monitoring"
+description = "Provider-backed terminal assistant for server monitoring"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [{ name = "Monix" }]
 license = "MIT"
-keywords = ["monitoring", "terminal", "cli", "gemini", "ai", "server", "devops"]
+keywords = ["monitoring", "terminal", "cli", "ai", "server", "devops", "codex"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

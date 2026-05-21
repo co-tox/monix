@@ -6,7 +6,7 @@
 <img width="800" height="450" alt="Image" src="https://github.com/user-attachments/assets/e49b62f6-fdd6-4e33-b30d-987be4c2696b" />
 
 
-Monix is a terminal-native, **read-only** AI assistant for server monitoring. It pairs a slash-command CLI with a Gemini-backed conversational agent so operators can inspect CPU, memory, disk, processes, services, logs (plain files, Nginx, Docker), and webhook alerts without leaving the shell — and without ever issuing destructive commands.
+Monix is a terminal-native, **read-only** AI assistant for server monitoring. It pairs a slash-command CLI with a provider-backed conversational agent so operators can inspect CPU, memory, disk, processes, services, logs (plain files, Nginx, Docker), and webhook alerts without leaving the shell — and without ever issuing destructive commands.
 
 - **Two interfaces, one mental model** — fast `/slash` commands for known intents, natural-language chat for everything else. Both share the same underlying tools.
 - **Zero runtime dependencies** — standard library only (`urllib`, `json`, `inspect`, `subprocess`, …).
@@ -40,9 +40,10 @@ pipx install "monix[mcp]"
 
 ## Setup
 
-### 1. Get a Gemini API key
+### 1. Prepare a provider
 
-Get a free key at [Google AI Studio](https://aistudio.google.com/app/apikey).
+- Gemini: get an API key at [Google AI Studio](https://aistudio.google.com/app/apikey).
+- OpenAI Codex: install Codex CLI in the same user environment, then run `codex login`.
 
 ### 2. Run monix
 
@@ -50,7 +51,7 @@ Get a free key at [Google AI Studio](https://aistudio.google.com/app/apikey).
 monix
 ```
 
-On first launch, Monix prompts for your Gemini API key (input is hidden). The key is validated before saving — invalid keys are rejected. Once saved to `~/.monix/config.json`, you won't be asked again.
+On first launch, Monix asks whether to use Gemini or OpenAI Codex. Gemini setup prompts for a hidden API key when one is not already configured. The experimental OpenAI Codex provider reuses the current user's Codex CLI login and asks you to run `codex login` first when that auth is missing.
 
 ### 3. One-shot mode
 
@@ -86,8 +87,10 @@ monix --set-platform
 
 | Variable | Description | Default |
 | --- | --- | --- |
+| `MONIX_LLM_PROVIDER` | LLM provider (`gemini` or `openai-codex`) | saved provider or Gemini legacy fallback |
 | `GEMINI_API_KEY` | Gemini API key (overrides saved key) | — |
-| `MONIX_MODEL` | Gemini model | `gemini-2.5-flash` |
+| `MONIX_LLM_MODEL` | Selected provider model | provider default |
+| `MONIX_MODEL` | Legacy Gemini model override | `gemini-2.5-flash` |
 | `MONIX_LOG_FILE` | Default log file path | auto-detected |
 | `MONIX_CPU_WARN` | CPU alert threshold (%) | `85.0` |
 | `MONIX_MEM_WARN` | Memory alert threshold (%) | `85.0` |
@@ -183,7 +186,7 @@ A `.env` file in the current directory is loaded automatically.
 | Command | Purpose |
 | --- | --- |
 | `/service <name>` | systemd service status |
-| `/ask <question>` | Force routing to Gemini |
+| `/ask <question>` | Force routing to the configured LLM provider |
 | `/clear` | Clear current conversation history |
 | `/help` | Show full command reference |
 | `/exit` | Quit |
@@ -229,7 +232,7 @@ Monix's conversational mode is a **two-dimensional multi-turn loop**, implemente
    append it, plus the registered log alias table, to the user
    text — gives the model a current "world view" up front.
 
-2. Send working history + tool schemas → Gemini.
+2. Send working history + tool schemas → selected provider.
 
 3. Inspect response parts:
      • text only          → terminal state, append (user, model)

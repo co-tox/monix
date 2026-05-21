@@ -149,3 +149,6 @@ cython_debug/
 
 # VS Code
 .vscode/
+
+# oh-my-codex workspace state
+.omx/
