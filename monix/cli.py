@@ -915,6 +915,7 @@ def _run_with_indicator(name: str, func, *args, **kwargs):
 
 
 def main():
+    _configure_terminal_output()
     parser = argparse.ArgumentParser(prog="monix")
     parser.add_argument("command", nargs="?", help="Command to run")
     parser.add_argument("args", nargs="*", help="Arguments for the command")
@@ -942,6 +943,12 @@ def main():
     else:
         print(render_reply(dispatch_natural(full_raw, settings)))
     return 0
+
+
+def _configure_terminal_output() -> None:
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(errors="replace")
 
 
 def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG001
