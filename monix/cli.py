@@ -132,6 +132,7 @@ HELP = """Commands:
   /docker help                     Show /docker usage details
 
   /logs <path> [lines]             Direct log view
+  /notify set log-errors on|off    Toggle log error webhook alerts
   /notify test [discord|slack]     Send test alert to webhook
   /notify status                   Show webhook configuration and last sent time
   /notify help                     Show /notify usage details
@@ -1702,18 +1703,31 @@ def _dispatch_notify(args: list[str], settings: Settings) -> str:
     if not args or args[0] in ("help", "--help"):
         return (
             "Notify commands:\n"
-            "  /notify set [discord|slack|cpu|memory|disk|cooldown] <value>\n"
-            "                                 Configure webhook settings (stored in ~/.monix/notify_config.json)\n"
+            "  /notify set <option> <value>   Configure webhook settings (stored in ~/.monix/notify_config.json)\n"
             "  /notify test [discord|slack]   Send a test alert to the specified webhook (both if omitted)\n"
             "  /notify status                 Show effective webhook configuration and last sent times\n"
             "\n"
+            "Metric alert options (/notify set ...):\n"
+            "  discord <url|off>              Discord webhook URL\n"
+            "  slack <url|off>                Slack webhook URL\n"
+            "  cpu on|off                     Toggle CPU threshold alerts\n"
+            "  memory on|off                  Toggle memory threshold alerts\n"
+            "  disk on|off                    Toggle disk threshold alerts\n"
+            "  cooldown <seconds>             Cooldown between repeated metric alerts (default: 3600)\n"
+            "\n"
+            "Log error alert options (/notify set ...):\n"
+            "  log-errors on|off              Toggle log error webhook alerts (default: off)\n"
+            "  log-severity error|warn        Minimum severity to alert on (default: error)\n"
+            "  log-cooldown <seconds>         Cooldown between repeated log alerts (default: 300)\n"
+            "\n"
             "Environment variables (overridden by /notify set):\n"
-            "  MONIX_DISCORD_WEBHOOK=<url>    Discord webhook URL\n"
-            "  MONIX_SLACK_WEBHOOK=<url>      Slack webhook URL\n"
-            "  MONIX_NOTIFY_COOLDOWN=3600     Seconds between repeated alerts (default: 1h)\n"
-            "  MONIX_NOTIFY_CPU=1             Send CPU alerts (0 to disable)\n"
-            "  MONIX_NOTIFY_MEM=1             Send memory alerts (0 to disable)\n"
-            "  MONIX_NOTIFY_DISK=1            Send disk alerts (0 to disable)"
+            "  MONIX_DISCORD_WEBHOOK=<url>         Discord webhook URL\n"
+            "  MONIX_SLACK_WEBHOOK=<url>            Slack webhook URL\n"
+            "  MONIX_NOTIFY_COOLDOWN=3600           Metric alert cooldown (default: 1h)\n"
+            "  MONIX_NOTIFY_CPU/MEM/DISK=1          Toggle metric alerts (0 to disable)\n"
+            "  MONIX_NOTIFY_LOG_ERRORS=0            Enable log error alerts (default: 0=off)\n"
+            "  MONIX_NOTIFY_LOG_SEVERITY=error      Min log severity: error|warn\n"
+            "  MONIX_NOTIFY_LOG_COOLDOWN=300        Log alert cooldown in seconds"
         )
 
     sub = args[0]

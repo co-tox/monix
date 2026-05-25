@@ -13,7 +13,8 @@
       "Bash(.venv/bin/python -c ' *)",
       "Bash(python -c \"from monix.render import render_logs; print\\('ok'\\)\")",
       "Bash(python *)",
-      "Bash(chmod +x *)"
+      "Bash(chmod +x *)",
+      "Bash(uv run *)"
     ]
   }
 }
