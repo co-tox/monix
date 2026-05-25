@@ -205,11 +205,11 @@ def test_max_output_tokens_defaults_per_method():
 
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
         client.chat([{"role": "user", "parts": [{"text": "hi"}]}])
-    assert captured["body"]["generationConfig"]["maxOutputTokens"] == 1024
+    assert captured["body"]["generationConfig"]["maxOutputTokens"] == 8192
 
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
         client.chat_with_tools([{"role": "user", "parts": [{"text": "hi"}]}], [])
-    assert captured["body"]["generationConfig"]["maxOutputTokens"] == 2048
+    assert captured["body"]["generationConfig"]["maxOutputTokens"] == 8192
 
 
 def test_max_output_tokens_override_applies_to_both_methods():

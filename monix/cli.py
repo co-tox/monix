@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import itertools
+import shutil
 import shlex
 import sys
 import threading
 import time
 import unicodedata
 import os
+from pathlib import Path
 
 from monix import __version__
 from monix.config import Settings
+from monix.config.settings import GEMINI_PROVIDER, OPENAI_CODEX_PROVIDER, default_model
 from monix.core.assistant import answer, infer_service_name, local_answer
 from monix.tools.collect import (
     CollectorConfig,
@@ -131,7 +135,7 @@ HELP = """Commands:
   /notify test [discord|slack]     Send test alert to webhook
   /notify status                   Show webhook configuration and last sent time
   /notify help                     Show /notify usage details
-  /ask <question>                  Ask Gemini (requires GEMINI_API_KEY)
+  /ask <question>                  Ask the configured LLM provider
   /clear                           Clear conversation history
   /help                            Show this help
   /exit                            Exit
@@ -430,20 +434,123 @@ class Spinner:
             self.thread.join()
 
 
+def _prompt_platform_setup(settings: Settings) -> Settings:
+    from monix.config.keystore import save_platform
+    from monix.picker import pick_option
+
+    detected = settings.platform
+    default_idx = 1 if detected == "mac" else 0
+    options = [
+        ("Linux", "Ubuntu, Debian, RHEL, …"),
+        ("macOS", "Apple Silicon / Intel"),
+    ]
+    idx = pick_option(f"Select your platform  (auto-detected: {detected})", options, default=default_idx)
+    if idx is None:
+        return settings
+    platform_val = "mac" if idx == 1 else "linux"
+    save_platform(platform_val)
+    print(f"\n  ✓ Platform set to '{platform_val}'.\n")
+    return dataclasses.replace(settings, platform=platform_val)
+
+
+def _prompt_llm_provider_setup(settings: Settings) -> Settings:
+    from monix.picker import pick_option
+
+    idx = pick_option(
+        "Select LLM provider",
+        [
+            ("Gemini", "Gemini API key"),
+            ("OpenAI Codex", "Codex CLI login from this user"),
+        ],
+    )
+    if idx == 0:
+        return _setup_gemini_provider(_with_llm_provider(settings, GEMINI_PROVIDER))
+    if idx == 1:
+        return _setup_codex_provider(_with_llm_provider(settings, OPENAI_CODEX_PROVIDER))
+    return settings
+
+
+def _setup_llm_provider(settings: Settings) -> Settings:
+    if settings.llm_provider == GEMINI_PROVIDER:
+        return _setup_gemini_provider(settings)
+    if settings.llm_provider == OPENAI_CODEX_PROVIDER:
+        return _setup_codex_provider(settings)
+    return _prompt_llm_provider_setup(settings)
+
+
+def _with_llm_provider(settings: Settings, provider: str) -> Settings:
+    model = settings.model
+    if settings.llm_provider is None and model == default_model(None):
+        model = default_model(provider)
+    return dataclasses.replace(settings, llm_provider=provider, model=model)
+
+
+def _setup_gemini_provider(settings: Settings) -> Settings:
+    from monix.config.keystore import save_llm_provider, save_model
+
+    settings = _with_llm_provider(settings, GEMINI_PROVIDER)
+    if not settings.gemini_api_key:
+        settings = _prompt_api_key_setup(settings)
+    if settings.gemini_api_key:
+        save_llm_provider(GEMINI_PROVIDER)
+        save_model(settings.model)
+    return settings
+
+
+def _setup_codex_provider(settings: Settings) -> Settings:
+    from monix.config.keystore import save_llm_provider, save_model
+
+    settings = _with_llm_provider(settings, OPENAI_CODEX_PROVIDER)
+    if not shutil.which("codex"):
+        print(
+            "\n  Codex CLI is required for the OpenAI Codex provider.\n"
+            "  Install Codex CLI in this environment, run: codex login\n"
+            "  Then restart monix.\n"
+        )
+        return settings
+
+    if not _codex_auth_is_present(_codex_auth_path()):
+        print(
+            "\n  OpenAI Codex auth was not found.\n\n"
+            "  Run:\n"
+            "    codex login\n\n"
+            "  Then restart monix.\n"
+        )
+        return settings
+
+    save_llm_provider(OPENAI_CODEX_PROVIDER)
+    save_model(settings.model)
+    print("\n  OpenAI Codex provider configured from current-user Codex CLI auth.\n")
+    return settings
+
+
+def _codex_auth_path() -> Path:
+    return Path.home() / ".codex" / "auth.json"
+
+
+def _codex_auth_is_present(path: Path) -> bool:
+    from monix.llm.providers.codex import load_codex_auth
+
+    return load_codex_auth(path) is not None
+
+
 def _prompt_api_key_setup(settings: Settings) -> Settings:
     import getpass
     from monix.config.keystore import save_api_key
     from monix.llm.gemini import GeminiClient
 
-    print("\n  Register Gemini API key to enable AI features.")
-    print("  Pasting is supported (input is hidden for security).")
-    print("  Press Enter to skip.\n")
+    print("\n  Gemini API key is required to use monix.")
+    print("  Get a free key at: https://aistudio.google.com/app/apikey")
+    print("  Pasting is supported (input is hidden for security).\n")
     for attempt in range(3):
         try:
             key = getpass.getpass("  Gemini API Key: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
+        except UnicodeDecodeError:
+            print("\r  ✗ Input encoding error. Please paste the key again.          ")
+            continue
         if not key:
             break
         print("  Validating key...", end="", flush=True)
@@ -451,33 +558,33 @@ def _prompt_api_key_setup(settings: Settings) -> Settings:
         if ok:
             save_api_key(key)
             print("\r  ✓ API key saved.                       ")
-            return Settings(
-                gemini_api_key=key,
-                model=settings.model,
-                log_file=settings.log_file,
-                thresholds=settings.thresholds,
-                platform=settings.platform,
-            )
+            return dataclasses.replace(settings, gemini_api_key=key)
         else:
             remaining = 2 - attempt
             msg = f"\r  ✗ Invalid key. ({err})"
             if remaining > 0:
                 msg += f" Try again. ({remaining} attempts left)"
             print(msg + "             ")
-    print("  Starting in Local monitor mode without AI features.\n")
+    print("\n  No API key set. Run monix again or set the GEMINI_API_KEY environment variable.\n")
     return settings
 
 
 def repl(settings: Settings | None = None) -> int:
     settings = settings or Settings.from_env()
-    if not settings.gemini_api_key:
-        settings = _prompt_api_key_setup(settings)
+    if not settings.llm_provider:
+        settings = _prompt_llm_provider_setup(settings)
+        if not settings.llm_provider:
+            return 1
+    if settings.llm_provider == GEMINI_PROVIDER and not settings.gemini_api_key:
+        settings = _setup_gemini_provider(settings)
+        if not settings.gemini_api_key:
+            return 1
     history: list[dict] = []
     cfg = load_collector_config()
     if cfg:
         _start_collector(cfg)
     print(clear_screen(), end="")
-    print(render_welcome(collect_snapshot(settings), bool(settings.gemini_api_key)))
+    print(render_welcome(collect_snapshot(settings), settings.llm_enabled))
 
     while True:
         try:
@@ -501,7 +608,7 @@ def repl(settings: Settings | None = None) -> int:
             cmd0 = raw.split()[0] if raw else ""
             if cmd0 == "/clear":
                 print(clear_screen(), end="")
-                print(render_welcome(collect_snapshot(settings), settings.gemini_enabled))
+                print(render_welcome(collect_snapshot(settings), settings.llm_enabled))
             elif _is_panel_output(output):
                 print("\n" + output)
             else:
@@ -585,12 +692,12 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
     # Detect natural language log search via @alias mention
     alias = _detect_log_alias(raw)
     if alias:
-        # Always let the LLM handle @alias queries when Gemini is enabled:
+        # Always let the LLM handle @alias queries when a provider is enabled:
         # it understands intent (tail/search/errors) and calls the right tool,
         # and assistant.py renders the result with the same Rich panels as the
-        # local path. Only fall back to local logic when Gemini is unavailable.
-        if settings.gemini_enabled:
-            with Spinner("Asking Gemini..."):
+        # local path. Only fall back to local logic when the LLM is unavailable.
+        if settings.llm_enabled:
+            with Spinner(_llm_spinner_message(settings)):
                 return answer(raw, settings, history)
         if _is_bare_alias_input(raw, alias):
             return (
@@ -599,9 +706,9 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
             )
         return _log_search_natural(alias, raw)
 
-    # Route all natural language to AI if Gemini is enabled
-    if settings.gemini_enabled:
-        with Spinner("Asking Gemini..."):
+    # Route all natural language to AI if a provider is enabled.
+    if settings.llm_enabled:
+        with Spinner(_llm_spinner_message(settings)):
             return answer(raw, settings, history)
 
     # Local fallback
@@ -617,6 +724,12 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
     if any(word in lowered for word in ("process", "top")):
         return render_processes(top_processes(10))
     return local_answer(raw)
+
+
+def _llm_spinner_message(settings: Settings) -> str:
+    if settings.llm_provider == OPENAI_CODEX_PROVIDER:
+        return "Asking OpenAI Codex..."
+    return "Asking Gemini..."
 
 
 _METRICS = {"cpu", "memory", "mem", "disk", "swap", "net", "network", "io"}
@@ -802,17 +915,23 @@ def _run_with_indicator(name: str, func, *args, **kwargs):
 
 
 def main():
+    _configure_terminal_output()
     parser = argparse.ArgumentParser(prog="monix")
     parser.add_argument("command", nargs="?", help="Command to run")
     parser.add_argument("args", nargs="*", help="Arguments for the command")
     parser.add_argument("--version", action="version", version=f"monix {__version__}")
-    parser.add_argument("--setup", action="store_true", help="Run API key setup")
+    parser.add_argument("--setup", action="store_true", help="Run LLM provider setup")
+    parser.add_argument("--set-platform", action="store_true", help="Change platform setting")
 
     args = parser.parse_args()
     settings = Settings.from_env()
 
     if args.setup:
-        _prompt_api_key_setup(settings)
+        _setup_llm_provider(settings)
+        return 0
+
+    if args.set_platform:
+        _prompt_platform_setup(settings)
         return 0
 
     if not args.command:
@@ -824,6 +943,12 @@ def main():
     else:
         print(render_reply(dispatch_natural(full_raw, settings)))
     return 0
+
+
+def _configure_terminal_output() -> None:
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(errors="replace")
 
 
 def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG001

@@ -20,6 +20,47 @@ def load_api_key() -> str | None:
 
 
 def save_api_key(key: str) -> None:
+    _save({"gemini_api_key": key})
+
+
+def load_llm_provider() -> str | None:
+    return _load_value("llm_provider")
+
+
+def save_llm_provider(provider: str) -> None:
+    _save({"llm_provider": provider})
+
+
+def load_model() -> str | None:
+    return _load_value("model")
+
+
+def save_model(model: str) -> None:
+    _save({"model": model})
+
+
+def load_platform() -> str | None:
+    return _load_value("platform")
+
+
+def _load_value(key: str) -> str | None:
+    if not _CONFIG_FILE.exists():
+        return None
+    try:
+        return json.loads(_CONFIG_FILE.read_text(encoding="utf-8")).get(key) or None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def save_platform(platform: str) -> None:
+    _save({"platform": platform})
+
+
+def is_first_run() -> bool:
+    return not _CONFIG_FILE.exists()
+
+
+def _save(updates: dict) -> None:
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     data: dict = {}
     if _CONFIG_FILE.exists():
@@ -27,6 +68,6 @@ def save_api_key(key: str) -> None:
             data = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
-    data["gemini_api_key"] = key
+    data.update(updates)
     _CONFIG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     os.chmod(_CONFIG_FILE, stat.S_IRUSR | stat.S_IWUSR)

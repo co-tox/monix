@@ -52,7 +52,7 @@ def build_alerts(snapshot: dict, thresholds) -> list[str]:
 def load_average() -> tuple[float, float, float] | None:
     try:
         return tuple(round(v, 2) for v in os.getloadavg())
-    except OSError:
+    except (AttributeError, OSError):
         return None
 
 

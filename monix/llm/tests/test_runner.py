@@ -48,6 +48,29 @@ def test_resolve_model_unknown_falls_back(monkeypatch):
     assert runner._resolve_model() == MODEL_FLASH
 
 
+def test_resolve_provider_codex(monkeypatch):
+    monkeypatch.setenv("MONIX_LLM_PROVIDER", "openai-codex")
+    assert runner._resolve_provider() == "openai-codex"
+
+
+def test_resolve_provider_codex_from_settings(monkeypatch):
+    monkeypatch.delenv("MONIX_LLM_PROVIDER", raising=False)
+
+    class _Settings:
+        llm_provider = "openai-codex"
+
+    assert runner._resolve_provider(_Settings()) == "openai-codex"
+
+
+def test_resolve_provider_preserves_unsupported_settings_provider(monkeypatch):
+    monkeypatch.delenv("MONIX_LLM_PROVIDER", raising=False)
+
+    class _Settings:
+        llm_provider = "not-supported"
+
+    assert runner._resolve_provider(_Settings()) == "not-supported"
+
+
 @pytest.mark.parametrize(
     "value, expected",
     [

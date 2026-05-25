@@ -6,7 +6,7 @@
 <img width="800" height="450" alt="Image" src="https://github.com/user-attachments/assets/e49b62f6-fdd6-4e33-b30d-987be4c2696b" />
 
 
-Monix는 서버 모니터링을 위한 터미널 네이티브 **읽기 전용** AI 어시스턴트입니다. 슬래시 커맨드 CLI와 Gemini 기반 대화형 에이전트를 결합하여, 운영자가 셸을 떠나지 않고 — 그리고 어떠한 파괴적 명령도 실행하지 않고 — CPU, 메모리, 디스크, 프로세스, 서비스, 로그(일반 파일, Nginx, Docker), 웹훅 알림을 점검할 수 있게 합니다.
+Monix는 서버 모니터링을 위한 터미널 네이티브 **읽기 전용** AI 어시스턴트입니다. 슬래시 커맨드 CLI와 provider 기반 대화형 에이전트를 결합하여, 운영자가 셸을 떠나지 않고 — 그리고 어떠한 파괴적 명령도 실행하지 않고 — CPU, 메모리, 디스크, 프로세스, 서비스, 로그(일반 파일, Nginx, Docker), 웹훅 알림을 점검할 수 있게 합니다.
 
 - **두 개의 인터페이스, 하나의 멘탈 모델** — 알려진 의도에는 빠른 `/슬래시` 명령을, 그 외에는 자연어 채팅을 사용합니다. 둘 다 동일한 기반 도구를 공유합니다.
 - **런타임 의존성 0** — 표준 라이브러리만 사용 (`urllib`, `json`, `inspect`, `subprocess`, …).
@@ -14,38 +14,103 @@ Monix는 서버 모니터링을 위한 터미널 네이티브 **읽기 전용** 
 
 ---
 
-## 빠른 시작
+## 설치
 
-### 설치
+### macOS
 
 ```bash
-uv venv
-uv pip install -e ".[dev]"
+pip install monix
 ```
 
-### 인터랙티브 REPL 실행
+### Ubuntu / Debian
 
 ```bash
-uv run monix
+sudo apt install pipx && pipx install monix && pipx ensurepath && source ~/.bashrc
 ```
 
-최초 실행 시 Monix가 Gemini API 키를 입력받습니다(붙여넣기 친화적, 입력 숨김 처리). Enter로 건너뛰면 로컬 전용 모드로 실행됩니다.
-
-### 원샷 모드
+### MCP 서버 지원 포함
 
 ```bash
-uv run monix /stat cpu
-uv run monix /log /var/log/syslog 100
-uv run monix "왜 메모리 사용량이 이렇게 높지?"
+pip install "monix[mcp]"
+# 또는
+pipx install "monix[mcp]"
+```
+
+---
+
+## 시작하기
+
+### 1. Provider 준비
+
+- Gemini: [Google AI Studio](https://aistudio.google.com/app/apikey)에서 API 키를 발급받습니다.
+- OpenAI Codex: Monix와 같은 사용자 환경에 Codex CLI를 설치한 뒤 `codex login`을 실행합니다.
+
+### 2. monix 실행
+
+```bash
+monix
+```
+
+최초 실행 시 Gemini 또는 OpenAI Codex provider를 선택합니다. Gemini는 API 키가 없으면 숨김 입력과 유효성 검사를 진행합니다. 실험적 OpenAI Codex provider는 현재 사용자의 Codex CLI 로그인 상태를 재사용하며, 인증이 없으면 먼저 `codex login`을 실행하라고 안내합니다.
+
+### 3. 원샷 모드
+
+```bash
+monix /stat cpu
+monix /log /var/log/syslog 100
+monix "왜 메모리 사용량이 이렇게 높지?"
 ```
 
 ### MCP 서버
 
-MCP 서버는 선택 기능이며 CLI와 동일한 읽기 전용 도구 registry를 사용합니다.
+```bash
+monix-mcp
+```
+
+---
+
+## 설정
+
+### API 키 변경
 
 ```bash
-uv pip install -e ".[mcp]"
-uv run monix-mcp
+monix --setup
+```
+
+### 플랫폼 변경 (자동 감지가 틀렸을 때)
+
+```bash
+monix --set-platform
+```
+
+### 환경 변수
+
+| 변수 | 설명 | 기본값 |
+| --- | --- | --- |
+| `MONIX_LLM_PROVIDER` | LLM provider (`gemini` 또는 `openai-codex`) | 저장된 provider 또는 Gemini 호환 경로 |
+| `GEMINI_API_KEY` | Gemini API 키 (저장된 키를 덮어씀) | — |
+| `MONIX_LLM_MODEL` | 선택한 provider 모델 | provider 기본값 |
+| `MONIX_MODEL` | 레거시 Gemini 모델 재정의 | `gemini-2.5-flash` |
+| `MONIX_LOG_FILE` | 기본 로그 파일 경로 | 자동 탐지 |
+| `MONIX_CPU_WARN` | CPU 경고 임계값 (%) | `85.0` |
+| `MONIX_MEM_WARN` | 메모리 경고 임계값 (%) | `85.0` |
+| `MONIX_DISK_WARN` | 디스크 경고 임계값 (%) | `90.0` |
+| `MONIX_DISCORD_WEBHOOK` | Discord 웹훅 URL | — |
+| `MONIX_SLACK_WEBHOOK` | Slack 웹훅 URL | — |
+| `MONIX_NOTIFY_COOLDOWN` | 알림 쿨다운 (초) | `3600` |
+| `MONIX_NOTIFY_CPU` | CPU 알림 (`0`/`false`로 비활성화) | `1` |
+| `MONIX_NOTIFY_MEM` | 메모리 알림 | `1` |
+| `MONIX_NOTIFY_DISK` | 디스크 알림 | `1` |
+| `MONIX_PLATFORM` | 플랫폼 재정의 (`linux`/`mac`) | 자동 |
+
+현재 작업 디렉토리의 `.env` 파일은 자동으로 로드됩니다.
+
+### 웹훅 알림 (앱 내 설정)
+
+```
+/notify set discord https://discord.com/api/webhooks/...
+/notify set slack https://hooks.slack.com/services/...
+/notify status
 ```
 
 ---
@@ -121,7 +186,7 @@ uv run monix-mcp
 | 명령어 | 용도 |
 | --- | --- |
 | `/service <name>` | systemd 서비스 상태 |
-| `/ask <question>` | Gemini로 강제 라우팅 |
+| `/ask <question>` | 설정된 LLM provider로 강제 라우팅 |
 | `/clear` | 현재 대화 이력 삭제 |
 | `/help` | 전체 커맨드 레퍼런스 표시 |
 | `/exit` | 종료 |
@@ -167,7 +232,7 @@ Monix의 대화 모드는 **2차원 멀티턴 루프**이며, `monix/core/assist
    등록된 로그 별칭 테이블과 함께 사용자 텍스트에 추가 —
    모델에게 현재 "세계관"을 미리 제공한다.
 
-2. 작업 이력 + 도구 스키마를 Gemini로 전송.
+2. 작업 이력 + 도구 스키마를 선택된 provider로 전송.
 
 3. 응답 부분을 검사:
      • 텍스트만             → 종료 상태, (user, model)을

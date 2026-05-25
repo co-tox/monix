@@ -24,8 +24,8 @@ MODEL_FLASH = "gemini-3.1-flash-preview"
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 _HTTP_TIMEOUT = 60
 
-_DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 1024
-_DEFAULT_TOOLS_MAX_OUTPUT_TOKENS = 2048
+_DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 8192
+_DEFAULT_TOOLS_MAX_OUTPUT_TOKENS = 8192
 
 
 class GeminiClient:
@@ -141,6 +141,24 @@ class GeminiClient:
                 "failed to parse Gemini response",
                 body_excerpt=raw[:200],
             ) from exc
+
+    @classmethod
+    def validate(cls, api_key: str, model: str) -> tuple[bool, str]:
+        """Return (True, "") if the key works, (False, reason) otherwise."""
+        client = cls(api_key, model)
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+            "generationConfig": {"maxOutputTokens": 1},
+        }
+        try:
+            client._post(payload)
+            return True, ""
+        except AuthError as exc:
+            return False, str(exc.message)
+        except LLMError as exc:
+            return False, str(exc.message)
+        except Exception as exc:
+            return False, str(exc)
 
     @staticmethod
     def _http_status_error(status: int, body: str) -> LLMError:

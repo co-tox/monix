@@ -162,7 +162,13 @@ def test_load_average_values_are_floats():
 
 
 def test_load_average_oserror_returns_none():
-    with patch("monix.tools.system.metrics.os.getloadavg", side_effect=OSError):
+    with patch("monix.tools.system.metrics.os.getloadavg", side_effect=OSError, create=True):
+        result = load_average()
+    assert result is None
+
+
+def test_load_average_missing_api_returns_none():
+    with patch("monix.tools.system.metrics.os.getloadavg", side_effect=AttributeError, create=True):
         result = load_average()
     assert result is None
 

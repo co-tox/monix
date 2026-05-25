@@ -47,10 +47,10 @@ _MASCOT = [
 ]
 
 
-def render_welcome(snapshot: dict, gemini_enabled: bool) -> str:
+def render_welcome(snapshot: dict, llm_enabled: bool) -> str:
     width = min(shutil.get_terminal_size((100, 24)).columns, 110)
     inner = max(width - 4, 60)
-    mode = badge("Gemini AI", "green") if gemini_enabled else badge("Local monitor", "yellow")
+    mode = badge("LLM AI", "green") if llm_enabled else badge("Local monitor", "yellow")
     alerts = snapshot.get("alerts") or []
     alert_text = badge(f"{len(alerts)} alert(s)", "red") if alerts else badge("healthy", "green")
     disk = (snapshot.get("disks") or [{}])[0]

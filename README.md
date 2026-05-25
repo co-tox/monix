@@ -6,7 +6,7 @@
 <img width="800" height="450" alt="Image" src="https://github.com/user-attachments/assets/e49b62f6-fdd6-4e33-b30d-987be4c2696b" />
 
 
-Monix is a terminal-native, **read-only** AI assistant for server monitoring. It pairs a slash-command CLI with a Gemini-backed conversational agent so operators can inspect CPU, memory, disk, processes, services, logs (plain files, Nginx, Docker), and webhook alerts without leaving the shell — and without ever issuing destructive commands.
+Monix is a terminal-native, **read-only** AI assistant for server monitoring. It pairs a slash-command CLI with a provider-backed conversational agent so operators can inspect CPU, memory, disk, processes, services, logs (plain files, Nginx, Docker), and webhook alerts without leaving the shell — and without ever issuing destructive commands.
 
 - **Two interfaces, one mental model** — fast `/slash` commands for known intents, natural-language chat for everything else. Both share the same underlying tools.
 - **Zero runtime dependencies** — standard library only (`urllib`, `json`, `inspect`, `subprocess`, …).
@@ -14,38 +14,103 @@ Monix is a terminal-native, **read-only** AI assistant for server monitoring. It
 
 ---
 
-## Quick Start
+## Installation
 
-### Install
+### macOS
 
 ```bash
-uv venv
-uv pip install -e ".[dev]"
+pip install monix
 ```
 
-### Launch the interactive REPL
+### Ubuntu / Debian
 
 ```bash
-uv run monix
+sudo apt install pipx && pipx install monix && pipx ensurepath && source ~/.bashrc
 ```
 
-On first launch, Monix prompts for a Gemini API key (paste-friendly, hidden input). Skip with Enter to run in local-only mode.
-
-### One-shot mode
+### With MCP server support
 
 ```bash
-uv run monix /stat cpu
-uv run monix /log /var/log/syslog 100
-uv run monix "why is memory so high?"
+pip install "monix[mcp]"
+# or
+pipx install "monix[mcp]"
+```
+
+---
+
+## Setup
+
+### 1. Prepare a provider
+
+- Gemini: get an API key at [Google AI Studio](https://aistudio.google.com/app/apikey).
+- OpenAI Codex: install Codex CLI in the same user environment, then run `codex login`.
+
+### 2. Run monix
+
+```bash
+monix
+```
+
+On first launch, Monix asks whether to use Gemini or OpenAI Codex. Gemini setup prompts for a hidden API key when one is not already configured. The experimental OpenAI Codex provider reuses the current user's Codex CLI login and asks you to run `codex login` first when that auth is missing.
+
+### 3. One-shot mode
+
+```bash
+monix /stat cpu
+monix /log /var/log/syslog 100
+monix "why is memory so high?"
 ```
 
 ### MCP server
 
-The MCP server is optional and uses the same read-only tool registry as the CLI.
+```bash
+monix-mcp
+```
+
+---
+
+## Configuration
+
+### Change API key
 
 ```bash
-uv pip install -e ".[mcp]"
-uv run monix-mcp
+monix --setup
+```
+
+### Change platform (if auto-detection is wrong)
+
+```bash
+monix --set-platform
+```
+
+### Environment variables
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `MONIX_LLM_PROVIDER` | LLM provider (`gemini` or `openai-codex`) | saved provider or Gemini legacy fallback |
+| `GEMINI_API_KEY` | Gemini API key (overrides saved key) | — |
+| `MONIX_LLM_MODEL` | Selected provider model | provider default |
+| `MONIX_MODEL` | Legacy Gemini model override | `gemini-2.5-flash` |
+| `MONIX_LOG_FILE` | Default log file path | auto-detected |
+| `MONIX_CPU_WARN` | CPU alert threshold (%) | `85.0` |
+| `MONIX_MEM_WARN` | Memory alert threshold (%) | `85.0` |
+| `MONIX_DISK_WARN` | Disk alert threshold (%) | `90.0` |
+| `MONIX_DISCORD_WEBHOOK` | Discord webhook URL | — |
+| `MONIX_SLACK_WEBHOOK` | Slack webhook URL | — |
+| `MONIX_NOTIFY_COOLDOWN` | Alert cooldown (seconds) | `3600` |
+| `MONIX_NOTIFY_CPU` | CPU alerts (`0`/`false` to disable) | `1` |
+| `MONIX_NOTIFY_MEM` | Memory alerts | `1` |
+| `MONIX_NOTIFY_DISK` | Disk alerts | `1` |
+| `MONIX_PLATFORM` | Override platform (`linux`/`mac`) | auto |
+
+A `.env` file in the current directory is loaded automatically.
+
+### Webhook alerts (in-app)
+
+```
+/notify set discord https://discord.com/api/webhooks/...
+/notify set slack https://hooks.slack.com/services/...
+/notify status
 ```
 
 ---
@@ -121,7 +186,7 @@ uv run monix-mcp
 | Command | Purpose |
 | --- | --- |
 | `/service <name>` | systemd service status |
-| `/ask <question>` | Force routing to Gemini |
+| `/ask <question>` | Force routing to the configured LLM provider |
 | `/clear` | Clear current conversation history |
 | `/help` | Show full command reference |
 | `/exit` | Quit |
@@ -167,7 +232,7 @@ Monix's conversational mode is a **two-dimensional multi-turn loop**, implemente
    append it, plus the registered log alias table, to the user
    text — gives the model a current "world view" up front.
 
-2. Send working history + tool schemas → Gemini.
+2. Send working history + tool schemas → selected provider.
 
 3. Inspect response parts:
      • text only          → terminal state, append (user, model)

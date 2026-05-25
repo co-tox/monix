@@ -3,8 +3,11 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
+from monix.config import Settings
 from monix.llm import executor, registry, trimmer
-from monix.llm.client import GeminiClient, MODEL_FLASH, MODEL_PRO, _HTTP_TIMEOUT
+from monix.llm.client import MODEL_FLASH, MODEL_PRO, _HTTP_TIMEOUT
+from monix.llm.providers.codex import DEFAULT_CODEX_MODEL
+from monix.llm.providers.factory import CODEX_PROVIDER, GEMINI_PROVIDER, create_client
 from monix.llm.types import History, LLMError
 
 
@@ -16,29 +19,32 @@ _DEFAULT_TOOL_RESULT_MAX_BYTES = 16_384
 def run_query(question: str, *, history: Optional[list[dict]] = None) -> Optional[str]:
     """Run a tool-calling chat turn and return the model's final text.
 
-    Returns ``None`` when ``GEMINI_API_KEY`` is not set so the caller can
-    fall back to local logic. Raises :class:`LLMError` for HTTP failures.
+    Returns ``None`` when the selected provider has no usable credentials so
+    the caller can fall back to local logic. Raises :class:`LLMError` for HTTP
+    failures.
     """
-    api_key = _resolve_api_key()
-    if api_key is None:
-        return None
-
-    model = _resolve_model()
+    settings = Settings.from_env()
+    provider = _resolve_provider(settings)
+    api_key = settings.gemini_api_key if provider == GEMINI_PROVIDER else None
+    model = _resolve_model(provider, settings.model)
     max_calls = _resolve_max_calls()
     token_budget = _resolve_token_budget()
     tool_result_max_bytes = _resolve_tool_result_max_bytes()
     max_output_tokens = _resolve_max_output_tokens()
     timeout = _resolve_timeout()
 
-    chat_history: History = history if history is not None else []
-    chat_history.append({"role": "user", "parts": [{"text": question}]})
-
-    client = GeminiClient(
-        api_key=api_key,
+    client = create_client(
+        provider=provider,
+        gemini_api_key=api_key,
         model=model,
         max_output_tokens=max_output_tokens,
         timeout=timeout,
     )
+    if not client.enabled:
+        return None
+
+    chat_history: History = history if history is not None else []
+    chat_history.append({"role": "user", "parts": [{"text": question}]})
     tool_schemas = registry.list_tools()
 
     total_tokens = 0
@@ -94,8 +100,19 @@ def _resolve_api_key() -> Optional[str]:
     return value or None
 
 
-def _resolve_model() -> str:
+def _resolve_provider(settings: Settings | None = None) -> str:
+    if settings is not None and settings.llm_provider:
+        return settings.llm_provider
+    raw = (os.environ.get("MONIX_LLM_PROVIDER") or "").strip().lower()
+    return raw or GEMINI_PROVIDER
+
+
+def _resolve_model(provider: str = GEMINI_PROVIDER, configured_model: str | None = None) -> str:
     raw = (os.environ.get("MONIX_LLM_MODEL") or "").strip()
+    if provider == CODEX_PROVIDER:
+        return raw or configured_model or DEFAULT_CODEX_MODEL
+    if configured_model:
+        return configured_model
     if not raw:
         return MODEL_FLASH
     lowered = raw.lower()

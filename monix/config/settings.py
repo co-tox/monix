@@ -23,6 +23,16 @@ def load_dotenv(path: str | Path = ".env") -> None:
 
 load_dotenv()
 
+GEMINI_PROVIDER = "gemini"
+OPENAI_CODEX_PROVIDER = "openai-codex"
+SUPPORTED_LLM_PROVIDERS = frozenset({GEMINI_PROVIDER, OPENAI_CODEX_PROVIDER})
+
+_DEFAULT_MODELS = {
+    GEMINI_PROVIDER: "gemini-2.5-flash",
+    OPENAI_CODEX_PROVIDER: "gpt-5.5",
+}
+_LEGACY_CODEX_DEFAULT_MODEL = "codex-mini-latest"
+
 
 @dataclasses.dataclass(frozen=True)
 class Thresholds:
@@ -55,19 +65,33 @@ class Settings:
     notify_log_errors: bool
     notify_log_severity: str   # "error" | "warn"
     notify_log_cooldown: int   # seconds
+    llm_provider: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
         import platform as _platform
-        from monix.config.keystore import load_api_key
+        from monix.config.keystore import load_api_key, load_llm_provider, load_model, load_platform
         from monix.tools.notify.config_store import load_notify_config
+
         _ncfg = load_notify_config()
+        _platform_val = (
+            os.getenv("MONIX_PLATFORM")
+            or load_platform()
+            or _platform.system()
+        )
+        gemini_api_key = os.getenv("GEMINI_API_KEY") or load_api_key()
+        llm_provider = _resolve_llm_provider(
+            os.getenv("MONIX_LLM_PROVIDER"),
+            load_llm_provider(),
+            gemini_api_key,
+        )
         return cls(
-            gemini_api_key=os.getenv("GEMINI_API_KEY") or load_api_key(),
-            model=os.getenv("MONIX_MODEL", "gemini-2.5-flash"),
+            gemini_api_key=gemini_api_key,
+            llm_provider=llm_provider,
+            model=_resolve_model(llm_provider, load_model()),
             log_file=default_log_file(),
             thresholds=Thresholds.from_env(),
-            platform=_resolve_platform(os.getenv("MONIX_PLATFORM", _platform.system())),
+            platform=_resolve_platform(_platform_val),
             discord_webhook=_ncfg.get("discord_url") or os.getenv("MONIX_DISCORD_WEBHOOK") or None,
             slack_webhook=_ncfg.get("slack_url") or os.getenv("MONIX_SLACK_WEBHOOK") or None,
             notify_cooldown=_ncfg.get("cooldown", int(_env_float("MONIX_NOTIFY_COOLDOWN", 3600.0))),
@@ -81,7 +105,40 @@ class Settings:
 
     @property
     def gemini_enabled(self) -> bool:
-        return bool(self.gemini_api_key)
+        return self.llm_provider in (None, GEMINI_PROVIDER) and bool(self.gemini_api_key)
+
+    @property
+    def llm_enabled(self) -> bool:
+        if self.llm_provider == GEMINI_PROVIDER:
+            return self.gemini_enabled
+        return self.llm_provider == OPENAI_CODEX_PROVIDER
+
+
+def default_model(provider: str | None) -> str:
+    return _DEFAULT_MODELS.get(provider or GEMINI_PROVIDER, _DEFAULT_MODELS[GEMINI_PROVIDER])
+
+
+def _resolve_llm_provider(
+    env_provider: str | None,
+    saved_provider: str | None,
+    gemini_api_key: str | None,
+) -> str | None:
+    for value in (env_provider, saved_provider):
+        if value:
+            normalized = value.strip().lower()
+            return normalized
+    if gemini_api_key:
+        return GEMINI_PROVIDER
+    return None
+
+
+def _resolve_model(provider: str | None, saved_model: str | None) -> str:
+    env_model = os.getenv("MONIX_LLM_MODEL") or os.getenv("MONIX_MODEL")
+    if env_model:
+        return env_model
+    if provider == OPENAI_CODEX_PROVIDER and saved_model == _LEGACY_CODEX_DEFAULT_MODEL:
+        return default_model(provider)
+    return saved_model or default_model(provider)
 
 
 def _resolve_platform(value: str) -> str:
