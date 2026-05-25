@@ -12,7 +12,8 @@
       "Bash(git push *)",
       "Bash(.venv/bin/python -c ' *)",
       "Bash(python -c \"from monix.render import render_logs; print\\('ok'\\)\")",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(chmod +x *)"
     ]
   }
 }
