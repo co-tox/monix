@@ -1105,6 +1105,11 @@ def _should_log_alert(sev: str, threshold: str) -> bool:
     return sev == "warn" and threshold == "warn"
 
 
+def _is_log_ignored(line: str, patterns: list) -> bool:
+    lower = line.lower()
+    return any(p.lower() in lower for p in patterns)
+
+
 def _fire_log_webhook(err_buf, source: str, severity: str, settings: Settings) -> None:
     from monix.tools.notify import LogAlertConfig, NotifyConfig, send_log_alert
     if not settings.discord_webhook and not settings.slack_webhook:
@@ -1142,8 +1147,9 @@ def _docker_live(container: str, n: int, settings: Settings) -> str:
             if settings.notify_log_errors:
                 sev = classify_line(line)
                 if _should_log_alert(sev, settings.notify_log_severity):
-                    err_buf.append(line)
-                    _fire_log_webhook(err_buf, source, sev, settings)
+                    if not _is_log_ignored(line, settings.notify_log_ignore):
+                        err_buf.append(line)
+                        _fire_log_webhook(err_buf, source, sev, settings)
     except KeyboardInterrupt:
         pass
     except Exception as exc:
@@ -1240,8 +1246,9 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
                     if settings.notify_log_errors:
                         sev = classify_line(line)
                         if _should_log_alert(sev, settings.notify_log_severity):
-                            err_buf.append(line)
-                            _fire_log_webhook(err_buf, raw_path, sev, settings)
+                            if not _is_log_ignored(line, settings.notify_log_ignore):
+                                err_buf.append(line)
+                                _fire_log_webhook(err_buf, raw_path, sev, settings)
             except KeyboardInterrupt:
                 pass
             except Exception as exc:
@@ -1329,8 +1336,9 @@ def _live_log(entry, initial_lines: int, settings: Settings) -> str:
             if settings.notify_log_errors:
                 sev = classify_line(line)
                 if _should_log_alert(sev, settings.notify_log_severity):
-                    err_buf.append(line)
-                    _fire_log_webhook(err_buf, source, sev, settings)
+                    if not _is_log_ignored(line, settings.notify_log_ignore):
+                        err_buf.append(line)
+                        _fire_log_webhook(err_buf, source, sev, settings)
     except KeyboardInterrupt:
         pass
     except Exception as exc:
@@ -1719,6 +1727,10 @@ def _dispatch_notify(args: list[str], settings: Settings) -> str:
             "  log-errors on|off              Toggle log error webhook alerts (default: off)\n"
             "  log-severity error|warn        Minimum severity to alert on (default: error)\n"
             "  log-cooldown <seconds>         Cooldown between repeated log alerts (default: 300)\n"
+            "  log-ignore add <pattern>       특정 패턴 포함 줄 알림 제외 (대소문자 무시)\n"
+            "  log-ignore remove <pattern>    무시 패턴 제거\n"
+            "  log-ignore list                무시 패턴 목록 표시\n"
+            "  log-ignore clear               무시 패턴 전체 삭제\n"
             "\n"
             "Environment variables (overridden by /notify set):\n"
             "  MONIX_DISCORD_WEBHOOK=<url>         Discord webhook URL\n"
@@ -1746,7 +1758,7 @@ def _dispatch_notify(args: list[str], settings: Settings) -> str:
 
 
 def _dispatch_notify_set(args: list[str]) -> str:
-    from monix.tools.notify.config_store import load_notify_config, set_notify_field, reset_notify_config
+    from monix.tools.notify.config_store import load_notify_config, reset_notify_config, save_notify_config, set_notify_field
 
     if not args:
         cfg = load_notify_config()
@@ -1787,6 +1799,8 @@ def _dispatch_notify_set(args: list[str]) -> str:
             lines.append(f"  log-sev:    {cfg['log_severity']}")
         if "log_cooldown" in cfg:
             lines.append(f"  log-cd:     {cfg['log_cooldown']}s")
+        if "log_ignore" in cfg and cfg["log_ignore"]:
+            lines.append(f"  log-ignore: {', '.join(cfg['log_ignore'])}")
         lines.append("\nRun /notify status to see the effective (merged) configuration.")
         return "\n".join(lines)
 
@@ -1851,9 +1865,50 @@ def _dispatch_notify_set(args: list[str]) -> str:
         set_notify_field("log_cooldown", secs)
         return f"Log alert cooldown set to {secs}s."
 
+    if sub == "log-ignore":
+        action = args[1].lower() if len(args) > 1 else ""
+        if action == "list":
+            cfg = load_notify_config()
+            patterns = cfg.get("log_ignore", [])
+            if not patterns:
+                return "Log ignore patterns: (none)"
+            numbered = "\n".join(f"  {i + 1}. {p}" for i, p in enumerate(patterns))
+            return f"Log ignore patterns:\n{numbered}"
+        if action == "clear":
+            cfg = load_notify_config()
+            save_notify_config({**cfg, "log_ignore": []})
+            return "Log ignore patterns cleared."
+        if action == "add":
+            if len(args) < 3:
+                return "Usage: /notify set log-ignore add <pattern>"
+            pattern = " ".join(args[2:])
+            cfg = load_notify_config()
+            lst: list = cfg.get("log_ignore", [])
+            if pattern in lst:
+                return f"Pattern already in ignore list: {pattern!r}"
+            save_notify_config({**cfg, "log_ignore": lst + [pattern]})
+            return f"Added to log ignore list: {pattern!r}"
+        if action == "remove":
+            if len(args) < 3:
+                return "Usage: /notify set log-ignore remove <pattern>"
+            pattern = " ".join(args[2:])
+            cfg = load_notify_config()
+            lst = cfg.get("log_ignore", [])
+            if pattern not in lst:
+                return f"Pattern not found in ignore list: {pattern!r}"
+            save_notify_config({**cfg, "log_ignore": [p for p in lst if p != pattern]})
+            return f"Removed from log ignore list: {pattern!r}"
+        return (
+            "Usage: /notify set log-ignore <action> [pattern]\n"
+            "  add <pattern>     무시 패턴 추가 (대소문자 구분 없음)\n"
+            "  remove <pattern>  무시 패턴 제거\n"
+            "  list              현재 무시 목록 표시\n"
+            "  clear             무시 목록 전체 삭제"
+        )
+
     return (
         f"Unknown setting: {sub!r}\n"
-        "Available: discord, slack, cpu, memory, disk, cooldown, log-errors, log-severity, log-cooldown, reset"
+        "Available: discord, slack, cpu, memory, disk, cooldown, log-errors, log-severity, log-cooldown, log-ignore, reset"
     )
 
 
@@ -1918,6 +1973,7 @@ def _notify_status(settings: Settings) -> str:
         f"  Log error alerts:   {'on' if settings.notify_log_errors else 'off'}",
         f"  Log min severity:   {settings.notify_log_severity}",
         f"  Log cooldown:       {settings.notify_log_cooldown}s",
+        f"  Log ignore:         {', '.join(settings.notify_log_ignore) if settings.notify_log_ignore else '(none)'}",
     ]
     if state:
         lines.append(f"  Last sent state: {state_path}")
