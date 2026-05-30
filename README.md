@@ -28,6 +28,12 @@ pip install monix
 sudo apt install pipx && pipx install monix && pipx ensurepath && source ~/.bashrc
 ```
 
+> Upgrading from an old source install? Remove the stale entry points first:
+>
+> ```bash
+> rm -f ~/.local/bin/monix ~/.local/bin/monix-mcp
+> ```
+
 ### With MCP server support
 
 ```bash

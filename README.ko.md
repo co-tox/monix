@@ -28,6 +28,12 @@ pip install monix
 sudo apt install pipx && pipx install monix && pipx ensurepath && source ~/.bashrc
 ```
 
+> 옛 소스 설치에서 업그레이드하는 경우 잔여 실행 파일을 먼저 지우세요.
+>
+> ```bash
+> rm -f ~/.local/bin/monix ~/.local/bin/monix-mcp
+> ```
+
 ### MCP 서버 지원 포함
 
 ```bash
