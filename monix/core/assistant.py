@@ -6,7 +6,24 @@ import textwrap
 from monix.config import Settings
 from monix.llm.providers.factory import create_client_from_settings
 from monix.llm.types import LLMError
-from monix.render import render_docker_containers, render_log_search, render_logs, render_nginx_summary, render_service
+from monix.render import (
+    render_cpu,
+    render_disk,
+    render_disk_io,
+    render_docker_containers,
+    render_docker_inspect,
+    render_docker_stats,
+    render_docker_top,
+    render_log_search,
+    render_logs,
+    render_memory,
+    render_network,
+    render_nginx_summary,
+    render_processes,
+    render_service,
+    render_service_list,
+    render_swap,
+)
 from monix.tools.calling import TOOL_DECLARATIONS, call_tool
 from monix.tools.logs import registry
 from monix.tools.system import collect_snapshot, human_bytes
@@ -24,6 +41,17 @@ _RENDER_MAP: dict[str, object] = {
     "tail_nginx_access": render_nginx_summary,
     "list_containers": render_docker_containers,
     "service_status": render_service,
+    "cpu_info": lambda r: render_cpu(r.get("cpu_percent"), r.get("load_average"), r.get("core_percents")),
+    "memory_info": render_memory,
+    "disk_info": render_disk,
+    "swap_info": render_swap,
+    "network_io": render_network,
+    "disk_io": render_disk_io,
+    "all_processes": render_processes,
+    "list_services": render_service_list,
+    "container_stats": render_docker_stats,
+    "container_processes": render_docker_top,
+    "container_inspect": render_docker_inspect,
 }
 
 

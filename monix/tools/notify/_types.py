@@ -15,3 +15,10 @@ class NotifyConfig(TypedDict, total=False):
     cooldown_seconds: int
     state_path: str
     alert_filter: AlertFilter
+
+
+class LogAlertConfig(TypedDict, total=False):
+    enabled: bool           # 기본값: False
+    min_severity: str       # "error" | "warn", 기본값: "error"
+    cooldown_seconds: int   # 기본값: 300
+    max_lines: int          # 웹훅에 포함할 최대 라인 수, 기본값: 5

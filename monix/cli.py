@@ -132,6 +132,7 @@ HELP = """Commands:
   /docker help                     Show /docker usage details
 
   /logs <path> [lines]             Direct log view
+  /notify set log-errors on|off    Toggle log error webhook alerts
   /notify test [discord|slack]     Send test alert to webhook
   /notify status                   Show webhook configuration and last sent time
   /notify help                     Show /notify usage details
@@ -979,7 +980,7 @@ def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG00
         if err:
             return err
         if "--live" in args:
-            return _docker_live(container, _get_opt(args, "-n", 20))
+            return _docker_live(container, _get_opt(args, "-n", 20), settings)
         if "--search" in args:
             pattern = _get_str_opt(args, "--search")
             return render_log_search(search_container(container, pattern=pattern, lines=_get_opt(args, "-n", 0)))
@@ -1036,7 +1037,7 @@ def _dispatch_docker(args: list[str], settings: Settings) -> str:  # noqa: ARG00
         err = _validate_flags(args[2:], frozenset({"-n"}), f"/docker live {args[1]} [-n N]")
         if err:
             return err
-        return _docker_live(container, _get_opt(args, "-n", 20))
+        return _docker_live(container, _get_opt(args, "-n", 20), settings)
 
     if sub == "stats":
         target = args[1] if len(args) > 1 else None
@@ -1098,14 +1099,57 @@ def _docker_add(args: list[str]) -> str:
     return f"[{action}] Docker container: @{alias} -> {container}"
 
 
-def _docker_live(container: str, n: int) -> str:
+def _should_log_alert(sev: str, threshold: str) -> bool:
+    if sev == "error":
+        return True
+    return sev == "warn" and threshold == "warn"
+
+
+def _is_log_ignored(line: str, patterns: list) -> bool:
+    lower = line.lower()
+    return any(p.lower() in lower for p in patterns)
+
+
+def _fire_log_webhook(err_buf, source: str, severity: str, settings: Settings) -> None:
+    from monix.tools.notify import LogAlertConfig, NotifyConfig, send_log_alert
+    if not settings.discord_webhook and not settings.slack_webhook:
+        return
+    send_log_alert(
+        list(err_buf),
+        source=source,
+        severity=severity,
+        config=NotifyConfig(
+            discord_url=settings.discord_webhook,
+            slack_url=settings.slack_webhook,
+        ),
+        log_config=LogAlertConfig(
+            enabled=True,
+            min_severity=settings.notify_log_severity,
+            cooldown_seconds=settings.notify_log_cooldown,
+        ),
+    )
+
+
+def _docker_live(container: str, n: int, settings: Settings) -> str:
+    from collections import deque
+
     from monix.render import style
-    print(f"\n  {style('→', 'cyan')} docker://{container}  Ctrl-C to stop\n")
+    from monix.tools.logs.app import classify_line
+
+    source = f"docker://{container}"
+    print(f"\n  {style('→', 'cyan')} {source}  Ctrl-C to stop\n")
+    err_buf: deque = deque(maxlen=5)
     try:
         for line in follow_container(container, n):
             if line is None:
                 break
             print("  " + colorize_log_line(line))
+            if settings.notify_log_errors:
+                sev = classify_line(line)
+                if _should_log_alert(sev, settings.notify_log_severity):
+                    if not _is_log_ignored(line, settings.notify_log_ignore):
+                        err_buf.append(line)
+                        _fire_log_webhook(err_buf, source, sev, settings)
     except KeyboardInterrupt:
         pass
     except Exception as exc:
@@ -1165,7 +1209,7 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
                 return err
             n = _get_opt(args, "-n", 80)
             if "--live" in args:
-                return _live_log(entry, n)
+                return _live_log(entry, n, settings)
             if "--search" in args:
                 pattern = _get_str_opt(args, "--search")
                 return _log_search_entry(entry, pattern, lines=_get_opt(args, "-n", 0))
@@ -1187,13 +1231,24 @@ def _dispatch_log(args: list[str], settings: Settings) -> str:
             return err
         n = _get_opt(args, "-n", 80)
         if "--live" in args:
+            from collections import deque
+
             from monix.render import style
+            from monix.tools.logs.app import classify_line
+
             print(f"\n  {style('→', 'cyan')} {raw_path}  Ctrl-C to stop\n")
+            err_buf: deque = deque(maxlen=5)
             try:
                 for line in follow_log(raw_path, n):
                     if line is None:
                         break
                     print("  " + colorize_log_line(line))
+                    if settings.notify_log_errors:
+                        sev = classify_line(line)
+                        if _should_log_alert(sev, settings.notify_log_severity):
+                            if not _is_log_ignored(line, settings.notify_log_ignore):
+                                err_buf.append(line)
+                                _fire_log_webhook(err_buf, raw_path, sev, settings)
             except KeyboardInterrupt:
                 pass
             except Exception as exc:
@@ -1255,23 +1310,35 @@ def _log_add(args: list[str]) -> str:
     return f"[{action}] {log_type} log: @{alias} -> {path}"
 
 
-def _live_log(entry, initial_lines: int) -> str:
+def _live_log(entry, initial_lines: int, settings: Settings) -> str:
+    from collections import deque
+
     from monix.render import style
+    from monix.tools.logs.app import classify_line
 
     if entry.type == "docker":
         container = entry.container or ""
-        print(f"\n  {style('→', 'cyan')} docker://{container}  Ctrl-C to stop\n")
+        source = f"docker://{container}"
+        print(f"\n  {style('→', 'cyan')} {source}  Ctrl-C to stop\n")
         gen = follow_container(container, initial_lines)
     else:
         path = entry.path or ""
+        source = path
         print(f"\n  {style('→', 'cyan')} @{entry.alias}  {path}  Ctrl-C to stop\n")
         gen = follow_log(path, initial_lines)
 
+    err_buf: deque = deque(maxlen=5)
     try:
         for line in gen:
             if line is None:
                 break
             print("  " + colorize_log_line(line))
+            if settings.notify_log_errors:
+                sev = classify_line(line)
+                if _should_log_alert(sev, settings.notify_log_severity):
+                    if not _is_log_ignored(line, settings.notify_log_ignore):
+                        err_buf.append(line)
+                        _fire_log_webhook(err_buf, source, sev, settings)
     except KeyboardInterrupt:
         pass
     except Exception as exc:
@@ -1644,18 +1711,35 @@ def _dispatch_notify(args: list[str], settings: Settings) -> str:
     if not args or args[0] in ("help", "--help"):
         return (
             "Notify commands:\n"
-            "  /notify set [discord|slack|cpu|memory|disk|cooldown] <value>\n"
-            "                                 Configure webhook settings (stored in ~/.monix/notify_config.json)\n"
+            "  /notify set <option> <value>   Configure webhook settings (stored in ~/.monix/notify_config.json)\n"
             "  /notify test [discord|slack]   Send a test alert to the specified webhook (both if omitted)\n"
             "  /notify status                 Show effective webhook configuration and last sent times\n"
             "\n"
+            "Metric alert options (/notify set ...):\n"
+            "  discord <url|off>              Discord webhook URL\n"
+            "  slack <url|off>                Slack webhook URL\n"
+            "  cpu on|off                     Toggle CPU threshold alerts\n"
+            "  memory on|off                  Toggle memory threshold alerts\n"
+            "  disk on|off                    Toggle disk threshold alerts\n"
+            "  cooldown <seconds>             Cooldown between repeated metric alerts (default: 3600)\n"
+            "\n"
+            "Log error alert options (/notify set ...):\n"
+            "  log-errors on|off              Toggle log error webhook alerts (default: off)\n"
+            "  log-severity error|warn        Minimum severity to alert on (default: error)\n"
+            "  log-cooldown <seconds>         Cooldown between repeated log alerts (default: 300)\n"
+            "  log-ignore add <pattern>       특정 패턴 포함 줄 알림 제외 (대소문자 무시)\n"
+            "  log-ignore remove <pattern>    무시 패턴 제거\n"
+            "  log-ignore list                무시 패턴 목록 표시\n"
+            "  log-ignore clear               무시 패턴 전체 삭제\n"
+            "\n"
             "Environment variables (overridden by /notify set):\n"
-            "  MONIX_DISCORD_WEBHOOK=<url>    Discord webhook URL\n"
-            "  MONIX_SLACK_WEBHOOK=<url>      Slack webhook URL\n"
-            "  MONIX_NOTIFY_COOLDOWN=3600     Seconds between repeated alerts (default: 1h)\n"
-            "  MONIX_NOTIFY_CPU=1             Send CPU alerts (0 to disable)\n"
-            "  MONIX_NOTIFY_MEM=1             Send memory alerts (0 to disable)\n"
-            "  MONIX_NOTIFY_DISK=1            Send disk alerts (0 to disable)"
+            "  MONIX_DISCORD_WEBHOOK=<url>         Discord webhook URL\n"
+            "  MONIX_SLACK_WEBHOOK=<url>            Slack webhook URL\n"
+            "  MONIX_NOTIFY_COOLDOWN=3600           Metric alert cooldown (default: 1h)\n"
+            "  MONIX_NOTIFY_CPU/MEM/DISK=1          Toggle metric alerts (0 to disable)\n"
+            "  MONIX_NOTIFY_LOG_ERRORS=0            Enable log error alerts (default: 0=off)\n"
+            "  MONIX_NOTIFY_LOG_SEVERITY=error      Min log severity: error|warn\n"
+            "  MONIX_NOTIFY_LOG_COOLDOWN=300        Log alert cooldown in seconds"
         )
 
     sub = args[0]
@@ -1674,7 +1758,7 @@ def _dispatch_notify(args: list[str], settings: Settings) -> str:
 
 
 def _dispatch_notify_set(args: list[str]) -> str:
-    from monix.tools.notify.config_store import load_notify_config, set_notify_field, reset_notify_config
+    from monix.tools.notify.config_store import load_notify_config, reset_notify_config, save_notify_config, set_notify_field
 
     if not args:
         cfg = load_notify_config()
@@ -1683,13 +1767,20 @@ def _dispatch_notify_set(args: list[str]) -> str:
                 "No settings configured via /notify set.\n"
                 "Using environment variables only.\n\n"
                 "Usage:\n"
-                "  /notify set discord <url|off>       Set/unset Discord webhook URL\n"
-                "  /notify set slack <url|off>         Set/unset Slack webhook URL\n"
-                "  /notify set cpu on|off              Toggle CPU alerts\n"
-                "  /notify set memory on|off           Toggle memory alerts\n"
-                "  /notify set disk on|off             Toggle disk alerts\n"
-                "  /notify set cooldown <seconds>      Set cooldown (default: 3600)\n"
-                "  /notify set reset                   Clear all stored settings"
+                "  /notify set discord <url|off>           Set/unset Discord webhook URL\n"
+                "  /notify set slack <url|off>             Set/unset Slack webhook URL\n"
+                "  /notify set cpu on|off                  Toggle CPU alerts\n"
+                "  /notify set memory on|off               Toggle memory alerts\n"
+                "  /notify set disk on|off                 Toggle disk alerts\n"
+                "  /notify set cooldown <seconds>          Set cooldown (default: 3600)\n"
+                "  /notify set log-errors on|off           Toggle log error alerts\n"
+                "  /notify set log-severity error|warn     Set minimum log severity\n"
+                "  /notify set log-cooldown <seconds>      Set log alert cooldown (default: 300)\n"
+                "  /notify set log-ignore add <pattern>    Ignore lines containing pattern\n"
+                "  /notify set log-ignore remove <pattern> Remove an ignore pattern\n"
+                "  /notify set log-ignore list             List all ignore patterns\n"
+                "  /notify set log-ignore clear            Clear all ignore patterns\n"
+                "  /notify set reset                       Clear all stored settings"
             )
         lines = ["Stored notify settings (override env vars):"]
         if "discord_url" in cfg:
@@ -1705,8 +1796,22 @@ def _dispatch_notify_set(args: list[str]) -> str:
         if "memory" in cfg:
             lines.append(f"  memory:   {'on' if cfg['memory'] else 'off'}")
         if "disk" in cfg:
-            lines.append(f"  disk:     {'on' if cfg['disk'] else 'off'}")
+            lines.append(f"  disk:       {'on' if cfg['disk'] else 'off'}")
+        if "log_errors" in cfg:
+            lines.append(f"  log-errors: {'on' if cfg['log_errors'] else 'off'}")
+        if "log_severity" in cfg:
+            lines.append(f"  log-sev:    {cfg['log_severity']}")
+        if "log_cooldown" in cfg:
+            lines.append(f"  log-cd:     {cfg['log_cooldown']}s")
+        if "log_ignore" in cfg and cfg["log_ignore"]:
+            lines.append(f"  log-ignore: {', '.join(cfg['log_ignore'])}")
         lines.append("\nRun /notify status to see the effective (merged) configuration.")
+        lines.append(
+            "\nAvailable sub-commands:\n"
+            "  discord <url|off>  slack <url|off>  cpu on|off  memory on|off  disk on|off\n"
+            "  cooldown <sec>     log-errors on|off  log-severity error|warn  log-cooldown <sec>\n"
+            "  log-ignore add|remove|list|clear [pattern]  reset"
+        )
         return "\n".join(lines)
 
     sub = args[0]
@@ -1745,9 +1850,75 @@ def _dispatch_notify_set(args: list[str]) -> str:
         set_notify_field("cooldown", secs)
         return f"Cooldown set to {secs}s."
 
+    if sub == "log-errors":
+        if len(args) < 2 or args[1].lower() not in ("on", "off"):
+            return "Usage: /notify set log-errors on|off"
+        enabled = args[1].lower() == "on"
+        set_notify_field("log_errors", enabled)
+        return f"Log error alerts {'enabled' if enabled else 'disabled'}."
+
+    if sub == "log-severity":
+        if len(args) < 2 or args[1].lower() not in ("error", "warn"):
+            return "Usage: /notify set log-severity error|warn"
+        set_notify_field("log_severity", args[1].lower())
+        return f"Log alert minimum severity set to '{args[1].lower()}'."
+
+    if sub == "log-cooldown":
+        if len(args) < 2:
+            return "Usage: /notify set log-cooldown <seconds>"
+        try:
+            secs = int(args[1])
+        except ValueError:
+            return f"Invalid log-cooldown value: {args[1]!r}  (must be an integer)"
+        if secs < 0:
+            return "Log cooldown must be 0 or greater."
+        set_notify_field("log_cooldown", secs)
+        return f"Log alert cooldown set to {secs}s."
+
+    if sub == "log-ignore":
+        action = args[1].lower() if len(args) > 1 else ""
+        if action == "list":
+            cfg = load_notify_config()
+            patterns = cfg.get("log_ignore", [])
+            if not patterns:
+                return "Log ignore patterns: (none)"
+            numbered = "\n".join(f"  {i + 1}. {p}" for i, p in enumerate(patterns))
+            return f"Log ignore patterns:\n{numbered}"
+        if action == "clear":
+            cfg = load_notify_config()
+            save_notify_config({**cfg, "log_ignore": []})
+            return "Log ignore patterns cleared."
+        if action == "add":
+            if len(args) < 3:
+                return "Usage: /notify set log-ignore add <pattern>"
+            pattern = " ".join(args[2:])
+            cfg = load_notify_config()
+            lst: list = cfg.get("log_ignore", [])
+            if pattern in lst:
+                return f"Pattern already in ignore list: {pattern!r}"
+            save_notify_config({**cfg, "log_ignore": lst + [pattern]})
+            return f"Added to log ignore list: {pattern!r}"
+        if action == "remove":
+            if len(args) < 3:
+                return "Usage: /notify set log-ignore remove <pattern>"
+            pattern = " ".join(args[2:])
+            cfg = load_notify_config()
+            lst = cfg.get("log_ignore", [])
+            if pattern not in lst:
+                return f"Pattern not found in ignore list: {pattern!r}"
+            save_notify_config({**cfg, "log_ignore": [p for p in lst if p != pattern]})
+            return f"Removed from log ignore list: {pattern!r}"
+        return (
+            "Usage: /notify set log-ignore <action> [pattern]\n"
+            "  add <pattern>     무시 패턴 추가 (대소문자 구분 없음)\n"
+            "  remove <pattern>  무시 패턴 제거\n"
+            "  list              현재 무시 목록 표시\n"
+            "  clear             무시 목록 전체 삭제"
+        )
+
     return (
         f"Unknown setting: {sub!r}\n"
-        "Available: discord, slack, cpu, memory, disk, cooldown, reset"
+        "Available: discord, slack, cpu, memory, disk, cooldown, log-errors, log-severity, log-cooldown, log-ignore, reset"
     )
 
 
@@ -1803,12 +1974,16 @@ def _notify_status(settings: Settings) -> str:
 
     lines = [
         "Notify configuration",
-        f"  Discord webhook: {_fmt_url(settings.discord_webhook)}",
-        f"  Slack webhook:   {_fmt_url(settings.slack_webhook)}",
-        f"  Cooldown:        {settings.notify_cooldown}s",
-        f"  CPU alerts:      {'on' if settings.notify_cpu else 'off'}",
-        f"  Memory alerts:   {'on' if settings.notify_mem else 'off'}",
-        f"  Disk alerts:     {'on' if settings.notify_disk else 'off'}",
+        f"  Discord webhook:    {_fmt_url(settings.discord_webhook)}",
+        f"  Slack webhook:      {_fmt_url(settings.slack_webhook)}",
+        f"  Cooldown:           {settings.notify_cooldown}s",
+        f"  CPU alerts:         {'on' if settings.notify_cpu else 'off'}",
+        f"  Memory alerts:      {'on' if settings.notify_mem else 'off'}",
+        f"  Disk alerts:        {'on' if settings.notify_disk else 'off'}",
+        f"  Log error alerts:   {'on' if settings.notify_log_errors else 'off'}",
+        f"  Log min severity:   {settings.notify_log_severity}",
+        f"  Log cooldown:       {settings.notify_log_cooldown}s",
+        f"  Log ignore:         {', '.join(settings.notify_log_ignore) if settings.notify_log_ignore else '(none)'}",
     ]
     if state:
         lines.append(f"  Last sent state: {state_path}")

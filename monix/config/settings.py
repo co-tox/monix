@@ -62,6 +62,10 @@ class Settings:
     notify_cpu: bool
     notify_mem: bool
     notify_disk: bool
+    notify_log_errors: bool
+    notify_log_severity: str   # "error" | "warn"
+    notify_log_cooldown: int   # seconds
+    notify_log_ignore: list    # 무시할 텍스트 패턴 목록
     llm_provider: str | None = None
 
     @classmethod
@@ -95,6 +99,10 @@ class Settings:
             notify_cpu=_ncfg.get("cpu", _env_bool("MONIX_NOTIFY_CPU")),
             notify_mem=_ncfg.get("memory", _env_bool("MONIX_NOTIFY_MEM")),
             notify_disk=_ncfg.get("disk", _env_bool("MONIX_NOTIFY_DISK")),
+            notify_log_errors=_ncfg.get("log_errors", _env_bool("MONIX_NOTIFY_LOG_ERRORS", False)),
+            notify_log_severity=_ncfg.get("log_severity", os.getenv("MONIX_NOTIFY_LOG_SEVERITY", "error")),
+            notify_log_cooldown=_ncfg.get("log_cooldown", int(_env_float("MONIX_NOTIFY_LOG_COOLDOWN", 300.0))),
+            notify_log_ignore=_ncfg.get("log_ignore", []),
         )
 
     @property

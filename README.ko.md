@@ -6,9 +6,11 @@
 <img width="800" height="450" alt="Image" src="https://github.com/user-attachments/assets/e49b62f6-fdd6-4e33-b30d-987be4c2696b" />
 
 
-Monix는 서버 모니터링을 위한 터미널 네이티브 **읽기 전용** AI 어시스턴트입니다. 슬래시 커맨드 CLI와 provider 기반 대화형 에이전트를 결합하여, 운영자가 셸을 떠나지 않고 — 그리고 어떠한 파괴적 명령도 실행하지 않고 — CPU, 메모리, 디스크, 프로세스, 서비스, 로그(일반 파일, Nginx, Docker), 웹훅 알림을 점검할 수 있게 합니다.
+Monix는 서버 모니터링을 위한 터미널 네이티브 AI 어시스턴트입니다. 슬래시 커맨드 CLI와 provider 기반 대화형 에이전트를 결합하여, 운영자가 셸을 떠나지 않고 CPU, 메모리, 디스크, 프로세스, 서비스, 로그(일반 파일, Nginx, Docker), 웹훅 알림을 점검할 수 있게 합니다.
 
 - **두 개의 인터페이스, 하나의 멘탈 모델** — 알려진 의도에는 빠른 `/슬래시` 명령을, 그 외에는 자연어 채팅을 사용합니다. 둘 다 동일한 기반 도구를 공유합니다.
+- **자연어 설정** — 로그 등록, 웹훅 설정, 알림 토글을 자연어로 요청하면 에이전트가 직접 실행하고 결과를 알려줍니다.
+- **서버 안전** — 서버 상태를 변경하는 명령(`rm`, `kill`, `systemctl restart` 등)은 절대 실행하지 않습니다. `~/.monix/` 아래의 Monix 자체 설정 파일만 쓸 수 있습니다.
 - **런타임 의존성 0** — 표준 라이브러리만 사용 (`urllib`, `json`, `inspect`, `subprocess`, …).
 - **크로스 플랫폼** — Linux (procfs) 및 macOS (vm_stat / sysctl).
 
@@ -101,6 +103,9 @@ monix --set-platform
 | `MONIX_NOTIFY_CPU` | CPU 알림 (`0`/`false`로 비활성화) | `1` |
 | `MONIX_NOTIFY_MEM` | 메모리 알림 | `1` |
 | `MONIX_NOTIFY_DISK` | 디스크 알림 | `1` |
+| `MONIX_NOTIFY_LOG_ERRORS` | 로그 오류 알림 활성화 (`0`/`false`로 비활성화) | `0` |
+| `MONIX_NOTIFY_LOG_SEVERITY` | 알림 최소 로그 심각도 (`error` 또는 `warn`) | `error` |
+| `MONIX_NOTIFY_LOG_COOLDOWN` | 로그 알림 쿨다운 (초) | `300` |
 | `MONIX_PLATFORM` | 플랫폼 재정의 (`linux`/`mac`) | 자동 |
 
 현재 작업 디렉토리의 `.env` 파일은 자동으로 로드됩니다.
@@ -112,6 +117,30 @@ monix --set-platform
 /notify set slack https://hooks.slack.com/services/...
 /notify status
 ```
+
+### 로그 오류 알림
+
+`--live` 모드로 로그를 스트리밍하는 중 오류 패턴이 감지되면 웹훅 알림을 발송합니다. `ERROR`, `FATAL`, `CRITICAL`, `Exception`, `Traceback` 등의 패턴에 반응합니다.
+
+```
+# 로그 오류 알림 활성화
+/notify set log-errors on
+
+# 최소 심각도: ERROR만 (기본값) 또는 WARN 이상도 포함
+/notify set log-severity error
+
+# 동일 소스에서 반복 알림 간격 (초)
+/notify set log-cooldown 300
+
+# 특정 패턴을 포함한 줄은 알림에서 제외 (대소문자 구분 없음)
+/notify set log-ignore add ConnectionRefused
+/notify set log-ignore add "404 Not Found"
+/notify set log-ignore list
+/notify set log-ignore remove ConnectionRefused
+/notify set log-ignore clear
+```
+
+활성화 이후 `/log @alias --live`, `/docker @alias --live` 등 모든 `--live` 스트림에서 일치하는 오류 줄을 자동으로 웹훅으로 발송하며, 무시 패턴에 해당하는 줄은 건너뜁니다.
 
 ---
 
@@ -134,6 +163,54 @@ monix --set-platform
   RSS 기준 최상위 컨테이너는 `payments-api` (1.2 GB / 2 GB cap).
   최근 재시작: 0회.  추천 후속 작업: /docker logs payments-api
 ```
+
+---
+
+## 자연어 인터페이스
+
+자유 텍스트 입력은 모두 설정된 LLM provider로 전달됩니다. 모델은 서버 모니터링 도구(읽기 전용)와 설정 도구(Monix 자체 config 쓰기)를 선택해 호출하며, 결과는 동등한 슬래시 커맨드와 동일한 Rich 패널로 출력됩니다.
+
+### 모니터링 질의
+
+```text
+> CPU가 왜 이렇게 높지?
+> 디스크 I/O 보여줘
+> nginx 서비스 상태 확인해줘
+> @api 로그 tail 해줘
+> payments 컨테이너에서 에러 찾아줘
+```
+
+### 자연어로 설정 변경
+
+슬래시 커맨드 문법을 외우지 않아도 원하는 것을 말하면 됩니다.
+
+```text
+> /var/log/api.log 를 @api 로 등록해줘
+  [등록] app 로그: @api -> /var/log/api.log
+
+> Discord 웹훅을 https://discord.com/api/webhooks/... 로 설정해줘
+  Discord 웹훅 URL 저장됨.
+
+> 로그 에러 알림 켜고 심각도 warn 이상으로 설정해줘
+  로그 에러 알림 활성화됨.
+  로그 알림 최소 심각도가 'warn'으로 설정됨.
+
+> healthcheck 포함 줄은 로그 알림에서 제외해줘
+  무시 패턴 추가됨: 'healthcheck'
+
+> 메트릭 수집을 1시간 간격, 30일 보관, ~/metrics 폴더로 설정해줘
+  히스토리 수집 설정 완료
+    수집 간격: 1.0h  /  보존 기간: 30.0d  /  저장 폴더: ~/metrics
+```
+
+### 안전 경계
+
+| 동작 | 자연어 | 슬래시 커맨드 |
+| --- | --- | --- |
+| 서버 메트릭 / 로그 / 서비스 조회 | 가능 | 가능 |
+| 로그 등록, 웹훅 설정, 알림 토글 | 가능 (tool 호출) | 가능 |
+| 설정 삭제 / 초기화 | CLI 안내만 | 가능 |
+| 서버 파괴적 명령 | 절대 불가 | 절대 불가 |
 
 ---
 
@@ -212,6 +289,11 @@ export MONIX_NOTIFY_COOLDOWN=3600
 export MONIX_NOTIFY_CPU=1
 export MONIX_NOTIFY_MEM=1
 export MONIX_NOTIFY_DISK=1
+
+# 로그 오류 알림 설정 (--live 모드)
+export MONIX_NOTIFY_LOG_ERRORS=1       # 활성화 (기본값: 0=비활성화)
+export MONIX_NOTIFY_LOG_SEVERITY=error # error | warn
+export MONIX_NOTIFY_LOG_COOLDOWN=300   # 소스별 알림 간격 (초)
 ```
 
 ---
@@ -224,6 +306,18 @@ Monix의 대화 모드는 **2차원 멀티턴 루프**이며, `monix/core/assist
 | --- | --- | --- |
 | **A. 대화 턴** | 이전 컨텍스트를 가지고 이어지는 사용자 프롬프트들 | 호출자 소유 `history: list[dict]`, REPL 턴에 걸쳐 누적 |
 | **B. 도구 호출 턴** | 한 사용자 프롬프트 내에서 모델은 답변 전에 도구를 반복 호출할 수 있음 | `answer()` 내부 루프 — `_MAX_TOOL_ROUNDS = 5`로 제한 |
+
+### 도구 분류
+
+| 분류 | 도구 | 효과 |
+| --- | --- | --- |
+| 메트릭 | `cpu_info`, `memory_info`, `disk_info`, `swap_info`, `network_io`, `disk_io`, `collect_snapshot`, `top_processes`, `all_processes` | 읽기 전용 |
+| 서비스 | `list_services`, `service_status` | 읽기 전용 |
+| Docker | `list_containers`, `container_stats`, `container_processes`, `container_inspect` | 읽기 전용 |
+| 로그 | `tail_log`, `search_log`, `tail_nginx_access`, `tail_container`, `search_container` | 읽기 전용 |
+| 설정 쓰기 | `log_add`, `notify_set_webhook`, `notify_set_metric_alert`, `notify_set_cooldown`, `notify_set_log_errors`, `notify_set_log_severity`, `notify_set_log_cooldown`, `notify_add_log_ignore`, `collect_set_config` | `~/.monix/` 에만 씀 |
+
+읽기 도구가 단독으로 호출되면 결과는 슬래시 커맨드와 동일한 Rich 패널로 직접 렌더링됩니다. 설정 쓰기 도구는 완료 메시지를 반환합니다. 파괴적 액션(`/log remove`, `/notify reset` 등)은 절대 실행하지 않고 CLI 명령을 안내합니다.
 
 ### 프롬프트별 루프
 

@@ -6,9 +6,11 @@
 <img width="800" height="450" alt="Image" src="https://github.com/user-attachments/assets/e49b62f6-fdd6-4e33-b30d-987be4c2696b" />
 
 
-Monix is a terminal-native, **read-only** AI assistant for server monitoring. It pairs a slash-command CLI with a provider-backed conversational agent so operators can inspect CPU, memory, disk, processes, services, logs (plain files, Nginx, Docker), and webhook alerts without leaving the shell — and without ever issuing destructive commands.
+Monix is a terminal-native AI assistant for server monitoring. It pairs a slash-command CLI with a provider-backed conversational agent so operators can inspect CPU, memory, disk, processes, services, logs (plain files, Nginx, Docker), and webhook alerts without leaving the shell.
 
 - **Two interfaces, one mental model** — fast `/slash` commands for known intents, natural-language chat for everything else. Both share the same underlying tools.
+- **Natural language configuration** — ask Monix to register logs, configure webhooks, and toggle alerts; it calls the right tool and confirms what it did.
+- **Server-safe** — never executes destructive server commands (`rm`, `kill`, `systemctl restart`, etc.). Only reads system state and writes to Monix's own config files under `~/.monix/`.
 - **Zero runtime dependencies** — standard library only (`urllib`, `json`, `inspect`, `subprocess`, …).
 - **Cross-platform** — Linux (procfs) and macOS (vm_stat / sysctl).
 
@@ -101,6 +103,9 @@ monix --set-platform
 | `MONIX_NOTIFY_CPU` | CPU alerts (`0`/`false` to disable) | `1` |
 | `MONIX_NOTIFY_MEM` | Memory alerts | `1` |
 | `MONIX_NOTIFY_DISK` | Disk alerts | `1` |
+| `MONIX_NOTIFY_LOG_ERRORS` | Enable log error alerts (`0`/`false` to disable) | `0` |
+| `MONIX_NOTIFY_LOG_SEVERITY` | Minimum log severity to alert on (`error` or `warn`) | `error` |
+| `MONIX_NOTIFY_LOG_COOLDOWN` | Log alert cooldown (seconds) | `300` |
 | `MONIX_PLATFORM` | Override platform (`linux`/`mac`) | auto |
 
 A `.env` file in the current directory is loaded automatically.
@@ -112,6 +117,30 @@ A `.env` file in the current directory is loaded automatically.
 /notify set slack https://hooks.slack.com/services/...
 /notify status
 ```
+
+### Log error alerts
+
+Monix can send a webhook notification when an error pattern is detected while streaming logs with `--live`. Triggered by `ERROR`, `FATAL`, `CRITICAL`, `Exception`, `Traceback` and similar patterns.
+
+```
+# Enable log error alerts
+/notify set log-errors on
+
+# Minimum severity: only ERROR (default) or also WARN
+/notify set log-severity error
+
+# Cooldown between repeated alerts for the same source (seconds)
+/notify set log-cooldown 300
+
+# Ignore lines containing a specific pattern (case-insensitive)
+/notify set log-ignore add ConnectionRefused
+/notify set log-ignore add "404 Not Found"
+/notify set log-ignore list
+/notify set log-ignore remove ConnectionRefused
+/notify set log-ignore clear
+```
+
+Once enabled, any `--live` stream (`/log @alias --live`, `/docker @alias --live`) will automatically send webhook alerts for matching error lines while skipping ignored patterns.
 
 ---
 
@@ -134,6 +163,54 @@ A `.env` file in the current directory is loaded automatically.
   Top container by RSS is `payments-api` (1.2 GB / 2 GB cap).
   Recent restarts: 0.  Suggested follow-up: /docker logs payments-api
 ```
+
+---
+
+## Natural Language Interface
+
+All free-text input is routed to the configured LLM provider. The model selects from monitoring tools (read-only server inspection) and configuration tools (write to Monix's own config). Both produce the same Rich panel output as the equivalent slash command.
+
+### Monitoring queries
+
+```text
+> why is CPU so high?
+> show disk I/O
+> check the nginx service
+> tail the @api log
+> find errors in the payments container
+```
+
+### Configuration via natural language
+
+Instead of memorising slash-command syntax, you can describe what you want:
+
+```text
+> register /var/log/api.log as @api
+  [Registered] app log: @api -> /var/log/api.log
+
+> set Discord webhook to https://discord.com/api/webhooks/...
+  Discord webhook URL saved.
+
+> enable log error alerts with warn severity
+  Log error alerts enabled.
+  Minimum log alert severity set to 'warn'.
+
+> ignore healthcheck lines in log alerts
+  Ignore pattern added: 'healthcheck'
+
+> set metrics collection every 1 hour, keep 30 days, store in ~/metrics
+  Metrics collector configured
+    Interval: 1.0h  /  Retention: 30.0d  /  Folder: ~/metrics
+```
+
+### Safety boundary
+
+| Action | Natural language | Slash command |
+| --- | --- | --- |
+| Read server metrics / logs / services | Yes | Yes |
+| Register logs, set webhooks, toggle alerts | Yes (tool call) | Yes |
+| Remove / reset configuration | CLI guidance only | Yes |
+| Destructive server commands | Never | Never |
 
 ---
 
@@ -212,6 +289,11 @@ export MONIX_NOTIFY_COOLDOWN=3600
 export MONIX_NOTIFY_CPU=1
 export MONIX_NOTIFY_MEM=1
 export MONIX_NOTIFY_DISK=1
+
+# Log error alert settings (--live mode)
+export MONIX_NOTIFY_LOG_ERRORS=1       # Enable (default: 0=off)
+export MONIX_NOTIFY_LOG_SEVERITY=error # error | warn
+export MONIX_NOTIFY_LOG_COOLDOWN=300   # Cooldown between alerts per source (seconds)
 ```
 
 ---
@@ -224,6 +306,18 @@ Monix's conversational mode is a **two-dimensional multi-turn loop**, implemente
 | --- | --- | --- |
 | **A. Conversation turns** | Successive user prompts, each carrying prior context | Caller-owned `history: list[dict]`, accumulated across REPL turns |
 | **B. Tool-calling rounds** | Within one user prompt, the model may call tools repeatedly before answering | Loop inside `answer()` — bounded by `_MAX_TOOL_ROUNDS = 5` |
+
+### Tool categories
+
+| Category | Tools | Effect |
+| --- | --- | --- |
+| Metrics | `cpu_info`, `memory_info`, `disk_info`, `swap_info`, `network_io`, `disk_io`, `collect_snapshot`, `top_processes`, `all_processes` | Read-only |
+| Services | `list_services`, `service_status` | Read-only |
+| Docker | `list_containers`, `container_stats`, `container_processes`, `container_inspect` | Read-only |
+| Logs | `tail_log`, `search_log`, `tail_nginx_access`, `tail_container`, `search_container` | Read-only |
+| Config writes | `log_add`, `notify_set_webhook`, `notify_set_metric_alert`, `notify_set_cooldown`, `notify_set_log_errors`, `notify_set_log_severity`, `notify_set_log_cooldown`, `notify_add_log_ignore`, `collect_set_config` | Writes to `~/.monix/` only |
+
+When a single read tool is called, its result is rendered directly as a Rich panel (same as the equivalent slash command). Config write tools return a confirmation message. Destructive actions (`/log remove`, `/notify reset`, etc.) are never executed by the model — it explains the CLI command instead.
 
 ### Per-prompt loop
 
