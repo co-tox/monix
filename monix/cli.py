@@ -1776,6 +1776,10 @@ def _dispatch_notify_set(args: list[str]) -> str:
                 "  /notify set log-errors on|off           Toggle log error alerts\n"
                 "  /notify set log-severity error|warn     Set minimum log severity\n"
                 "  /notify set log-cooldown <seconds>      Set log alert cooldown (default: 300)\n"
+                "  /notify set log-ignore add <pattern>    Ignore lines containing pattern\n"
+                "  /notify set log-ignore remove <pattern> Remove an ignore pattern\n"
+                "  /notify set log-ignore list             List all ignore patterns\n"
+                "  /notify set log-ignore clear            Clear all ignore patterns\n"
                 "  /notify set reset                       Clear all stored settings"
             )
         lines = ["Stored notify settings (override env vars):"]
@@ -1802,6 +1806,12 @@ def _dispatch_notify_set(args: list[str]) -> str:
         if "log_ignore" in cfg and cfg["log_ignore"]:
             lines.append(f"  log-ignore: {', '.join(cfg['log_ignore'])}")
         lines.append("\nRun /notify status to see the effective (merged) configuration.")
+        lines.append(
+            "\nAvailable sub-commands:\n"
+            "  discord <url|off>  slack <url|off>  cpu on|off  memory on|off  disk on|off\n"
+            "  cooldown <sec>     log-errors on|off  log-severity error|warn  log-cooldown <sec>\n"
+            "  log-ignore add|remove|list|clear [pattern]  reset"
+        )
         return "\n".join(lines)
 
     sub = args[0]

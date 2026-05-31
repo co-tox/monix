@@ -101,6 +101,9 @@ monix --set-platform
 | `MONIX_NOTIFY_CPU` | CPU alerts (`0`/`false` to disable) | `1` |
 | `MONIX_NOTIFY_MEM` | Memory alerts | `1` |
 | `MONIX_NOTIFY_DISK` | Disk alerts | `1` |
+| `MONIX_NOTIFY_LOG_ERRORS` | Enable log error alerts (`0`/`false` to disable) | `0` |
+| `MONIX_NOTIFY_LOG_SEVERITY` | Minimum log severity to alert on (`error` or `warn`) | `error` |
+| `MONIX_NOTIFY_LOG_COOLDOWN` | Log alert cooldown (seconds) | `300` |
 | `MONIX_PLATFORM` | Override platform (`linux`/`mac`) | auto |
 
 A `.env` file in the current directory is loaded automatically.
@@ -112,6 +115,30 @@ A `.env` file in the current directory is loaded automatically.
 /notify set slack https://hooks.slack.com/services/...
 /notify status
 ```
+
+### Log error alerts
+
+Monix can send a webhook notification when an error pattern is detected while streaming logs with `--live`. Triggered by `ERROR`, `FATAL`, `CRITICAL`, `Exception`, `Traceback` and similar patterns.
+
+```
+# Enable log error alerts
+/notify set log-errors on
+
+# Minimum severity: only ERROR (default) or also WARN
+/notify set log-severity error
+
+# Cooldown between repeated alerts for the same source (seconds)
+/notify set log-cooldown 300
+
+# Ignore lines containing a specific pattern (case-insensitive)
+/notify set log-ignore add ConnectionRefused
+/notify set log-ignore add "404 Not Found"
+/notify set log-ignore list
+/notify set log-ignore remove ConnectionRefused
+/notify set log-ignore clear
+```
+
+Once enabled, any `--live` stream (`/log @alias --live`, `/docker @alias --live`) will automatically send webhook alerts for matching error lines while skipping ignored patterns.
 
 ---
 
@@ -212,6 +239,11 @@ export MONIX_NOTIFY_COOLDOWN=3600
 export MONIX_NOTIFY_CPU=1
 export MONIX_NOTIFY_MEM=1
 export MONIX_NOTIFY_DISK=1
+
+# Log error alert settings (--live mode)
+export MONIX_NOTIFY_LOG_ERRORS=1       # Enable (default: 0=off)
+export MONIX_NOTIFY_LOG_SEVERITY=error # error | warn
+export MONIX_NOTIFY_LOG_COOLDOWN=300   # Cooldown between alerts per source (seconds)
 ```
 
 ---

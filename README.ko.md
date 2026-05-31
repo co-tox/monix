@@ -101,6 +101,9 @@ monix --set-platform
 | `MONIX_NOTIFY_CPU` | CPU 알림 (`0`/`false`로 비활성화) | `1` |
 | `MONIX_NOTIFY_MEM` | 메모리 알림 | `1` |
 | `MONIX_NOTIFY_DISK` | 디스크 알림 | `1` |
+| `MONIX_NOTIFY_LOG_ERRORS` | 로그 오류 알림 활성화 (`0`/`false`로 비활성화) | `0` |
+| `MONIX_NOTIFY_LOG_SEVERITY` | 알림 최소 로그 심각도 (`error` 또는 `warn`) | `error` |
+| `MONIX_NOTIFY_LOG_COOLDOWN` | 로그 알림 쿨다운 (초) | `300` |
 | `MONIX_PLATFORM` | 플랫폼 재정의 (`linux`/`mac`) | 자동 |
 
 현재 작업 디렉토리의 `.env` 파일은 자동으로 로드됩니다.
@@ -112,6 +115,30 @@ monix --set-platform
 /notify set slack https://hooks.slack.com/services/...
 /notify status
 ```
+
+### 로그 오류 알림
+
+`--live` 모드로 로그를 스트리밍하는 중 오류 패턴이 감지되면 웹훅 알림을 발송합니다. `ERROR`, `FATAL`, `CRITICAL`, `Exception`, `Traceback` 등의 패턴에 반응합니다.
+
+```
+# 로그 오류 알림 활성화
+/notify set log-errors on
+
+# 최소 심각도: ERROR만 (기본값) 또는 WARN 이상도 포함
+/notify set log-severity error
+
+# 동일 소스에서 반복 알림 간격 (초)
+/notify set log-cooldown 300
+
+# 특정 패턴을 포함한 줄은 알림에서 제외 (대소문자 구분 없음)
+/notify set log-ignore add ConnectionRefused
+/notify set log-ignore add "404 Not Found"
+/notify set log-ignore list
+/notify set log-ignore remove ConnectionRefused
+/notify set log-ignore clear
+```
+
+활성화 이후 `/log @alias --live`, `/docker @alias --live` 등 모든 `--live` 스트림에서 일치하는 오류 줄을 자동으로 웹훅으로 발송하며, 무시 패턴에 해당하는 줄은 건너뜁니다.
 
 ---
 
@@ -212,6 +239,11 @@ export MONIX_NOTIFY_COOLDOWN=3600
 export MONIX_NOTIFY_CPU=1
 export MONIX_NOTIFY_MEM=1
 export MONIX_NOTIFY_DISK=1
+
+# 로그 오류 알림 설정 (--live 모드)
+export MONIX_NOTIFY_LOG_ERRORS=1       # 활성화 (기본값: 0=비활성화)
+export MONIX_NOTIFY_LOG_SEVERITY=error # error | warn
+export MONIX_NOTIFY_LOG_COOLDOWN=300   # 소스별 알림 간격 (초)
 ```
 
 ---
