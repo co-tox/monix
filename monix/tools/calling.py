@@ -4,6 +4,17 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from monix.tools.config_actions import (
+    collect_set_config,
+    log_add,
+    notify_add_log_ignore,
+    notify_set_cooldown,
+    notify_set_log_cooldown,
+    notify_set_log_errors,
+    notify_set_log_severity,
+    notify_set_metric_alert,
+    notify_set_webhook,
+)
 from monix.tools.logs import search_log, tail_log
 from monix.tools.logs.docker import list_containers, search_container, tail_container
 from monix.tools.logs.nginx import tail_nginx_access
@@ -376,6 +387,179 @@ TOOL_DECLARATIONS: list[dict] = [
             "required": ["container"],
         },
     },
+    # ── Monix configuration write tools (Tier 2) ─────────────────────────────
+    {
+        "name": "log_add",
+        "description": (
+            "Register a log source (app/nginx/docker) with an alias for monitoring. "
+            "Use when the user asks to add or register a log file or Docker container."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "alias": {
+                    "type": "string",
+                    "description": "Short alias name without @. e.g. 'api', 'nginx'",
+                },
+                "log_type": {
+                    "type": "string",
+                    "enum": ["app", "nginx", "docker"],
+                    "description": "Log source type",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Absolute file path (required for app/nginx types)",
+                },
+                "container": {
+                    "type": "string",
+                    "description": "Docker container name (required for docker type)",
+                },
+            },
+            "required": ["alias", "log_type"],
+        },
+    },
+    {
+        "name": "notify_set_webhook",
+        "description": (
+            "Set or clear a Discord or Slack webhook URL for alert notifications. "
+            "Use when the user asks to configure a webhook URL."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "platform": {
+                    "type": "string",
+                    "enum": ["discord", "slack"],
+                    "description": "Webhook platform",
+                },
+                "url": {
+                    "type": "string",
+                    "description": "Webhook URL. Omit or null to clear the URL.",
+                },
+            },
+            "required": ["platform"],
+        },
+    },
+    {
+        "name": "notify_set_metric_alert",
+        "description": "Enable or disable CPU, memory, or disk metric threshold alert notifications.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "metric": {
+                    "type": "string",
+                    "enum": ["cpu", "memory", "disk"],
+                    "description": "Metric type",
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "description": "true to enable, false to disable",
+                },
+            },
+            "required": ["metric", "enabled"],
+        },
+    },
+    {
+        "name": "notify_set_cooldown",
+        "description": "Set the cooldown period (seconds) between repeated metric alert notifications.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "seconds": {
+                    "type": "integer",
+                    "description": "Cooldown in seconds (default 3600)",
+                    "minimum": 0,
+                },
+            },
+            "required": ["seconds"],
+        },
+    },
+    {
+        "name": "notify_set_log_errors",
+        "description": "Enable or disable log error webhook alert notifications.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "description": "true to enable, false to disable",
+                },
+            },
+            "required": ["enabled"],
+        },
+    },
+    {
+        "name": "notify_set_log_severity",
+        "description": "Set the minimum log severity level for alert notifications: 'error' or 'warn'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "severity": {
+                    "type": "string",
+                    "enum": ["error", "warn"],
+                    "description": "Minimum severity level",
+                },
+            },
+            "required": ["severity"],
+        },
+    },
+    {
+        "name": "notify_set_log_cooldown",
+        "description": "Set the cooldown period (seconds) between repeated log error alert notifications.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "seconds": {
+                    "type": "integer",
+                    "description": "Log alert cooldown in seconds (default 300)",
+                    "minimum": 0,
+                },
+            },
+            "required": ["seconds"],
+        },
+    },
+    {
+        "name": "notify_add_log_ignore",
+        "description": (
+            "Add a pattern to the log ignore list. "
+            "Log lines containing this pattern will not trigger webhook alerts."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "String pattern to ignore (case-insensitive substring match)",
+                },
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
+        "name": "collect_set_config",
+        "description": (
+            "Configure the metrics history collector. "
+            "Use when the user asks to set up or update the data collection schedule and storage."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "interval": {
+                    "type": "string",
+                    "description": "Collection interval with unit: e.g. '1h', '30m', '1d'",
+                },
+                "retention": {
+                    "type": "string",
+                    "description": "Data retention period with unit: e.g. '30d', '7d', '24h'",
+                },
+                "folder": {
+                    "type": "string",
+                    "description": "Absolute path to the storage folder",
+                },
+            },
+            "required": ["interval", "retention", "folder"],
+        },
+    },
 ]
 
 # Anthropic tools format (input_schema instead of parameters)
@@ -418,6 +602,15 @@ _HANDLERS: dict[str, Any] = {
     "container_stats": container_stats,
     "container_processes": container_processes,
     "container_inspect": container_inspect,
+    "log_add": log_add,
+    "notify_set_webhook": notify_set_webhook,
+    "notify_set_metric_alert": notify_set_metric_alert,
+    "notify_set_cooldown": notify_set_cooldown,
+    "notify_set_log_errors": notify_set_log_errors,
+    "notify_set_log_severity": notify_set_log_severity,
+    "notify_set_log_cooldown": notify_set_log_cooldown,
+    "notify_add_log_ignore": notify_add_log_ignore,
+    "collect_set_config": collect_set_config,
 }
 
 
