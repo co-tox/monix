@@ -1,35 +1,39 @@
 {
-	"permissions": {
-		"allow": [
-			"Bash(python3 *)",
-			"Bash(.venv/bin/pip install *)",
-			"Bash(.venv/bin/python3 *)",
-			"Bash(.venv/bin/pytest *)",
-			"Bash(gh auth *)",
-			"Bash(git checkout *)",
-			"Bash(git add *)",
-			"Bash(git commit -m ' *)",
-			"Bash(git push *)",
-			"Bash(.venv/bin/python -c ' *)",
-			"Bash(python -c \"from monix.render import render_logs; print\\('ok'\\)\")",
-			"Bash(python *)",
-			"Bash(chmod +x *)",
-			"Bash(uv run *)",
-			"mcp__codegraph__codegraph_search",
-			"mcp__codegraph__codegraph_context",
-			"mcp__codegraph__codegraph_callers",
-			"mcp__codegraph__codegraph_callees",
-			"mcp__codegraph__codegraph_impact",
-			"mcp__codegraph__codegraph_node",
-			"mcp__codegraph__codegraph_status",
-			"mcp__codegraph__codegraph_files"
-		]
-	},
-	"mcpServers": {
-		"codegraph": {
-			"type": "stdio",
-			"command": "codegraph",
-			"args": ["serve", "--mcp"]
-		}
-	}
+  "permissions": {
+    "allow": [
+      "Bash(python3 *)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python3 *)",
+      "Bash(.venv/bin/pytest *)",
+      "Bash(gh auth *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(python -c \"from monix.render import render_logs; print\\('ok'\\)\")",
+      "Bash(python *)",
+      "Bash(chmod +x *)",
+      "Bash(uv run *)",
+      "mcp__codegraph__codegraph_search",
+      "mcp__codegraph__codegraph_context",
+      "mcp__codegraph__codegraph_callers",
+      "mcp__codegraph__codegraph_callees",
+      "mcp__codegraph__codegraph_impact",
+      "mcp__codegraph__codegraph_node",
+      "mcp__codegraph__codegraph_status",
+      "mcp__codegraph__codegraph_files",
+      "Bash(xargs ls -la)"
+    ]
+  },
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "codegraph",
+      "args": [
+        "serve",
+        "--mcp"
+      ]
+    }
+  }
 }

@@ -270,7 +270,8 @@ def _read_line(prompt_str: str) -> str:
                 continue
 
             # ── Backspace ────────────────────────────────────────────
-            if b == b"\x7f":
+            # \x7f = DEL (most terminals), \x08 = BS (MobaXterm, some SSH clients)
+            if b in (b"\x7f", b"\x08"):
                 if cursor_pos > 0:
                     buf.pop(cursor_pos - 1)
                     cursor_pos -= 1
