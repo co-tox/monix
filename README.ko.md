@@ -91,8 +91,8 @@ monix --set-platform
 | --- | --- | --- |
 | `MONIX_LLM_PROVIDER` | LLM provider (`gemini` 또는 `openai-codex`) | 저장된 provider 또는 Gemini 호환 경로 |
 | `GEMINI_API_KEY` | Gemini API 키 (저장된 키를 덮어씀) | — |
-| `MONIX_LLM_MODEL` | 선택한 provider 모델 | provider 기본값 |
-| `MONIX_MODEL` | 레거시 Gemini 모델 재정의 | `gemini-2.5-flash` |
+| `MONIX_LLM_MODEL` | 선택한 provider 모델 | `gemini-3.1-flash-preview` |
+| `MONIX_MODEL` | 레거시 Gemini 모델 재정의 | `gemini-3.1-flash-preview` |
 | `MONIX_LOG_FILE` | 기본 로그 파일 경로 | 자동 탐지 |
 | `MONIX_CPU_WARN` | CPU 경고 임계값 (%) | `85.0` |
 | `MONIX_MEM_WARN` | 메모리 경고 임계값 (%) | `85.0` |
@@ -305,13 +305,15 @@ Monix의 대화 모드는 **2차원 멀티턴 루프**이며, `monix/core/assist
 | 차원 | 의미 | 상태 |
 | --- | --- | --- |
 | **A. 대화 턴** | 이전 컨텍스트를 가지고 이어지는 사용자 프롬프트들 | 호출자 소유 `history: list[dict]`, REPL 턴에 걸쳐 누적 |
-| **B. 도구 호출 턴** | 한 사용자 프롬프트 내에서 모델은 답변 전에 도구를 반복 호출할 수 있음 | `answer()` 내부 루프 — `_MAX_TOOL_ROUNDS = 5`로 제한 |
+| **B. 도구 호출 턴** | 한 사용자 프롬프트 내에서 모델은 답변 전에 도구를 반복 호출할 수 있음 | `answer_stream()` 내부 루프 — `_MAX_TOOL_ROUNDS = 5`로 제한 |
+
+텍스트 응답은 SSE(`GeminiClient`의 `stream_round` / `chat_stream`)를 통해 토큰 단위로 스트리밍되어 터미널에 점진적으로 출력됩니다. 도구 호출 자체는 각 라운드 내에서 동기적으로 실행됩니다.
 
 ### 도구 분류
 
 | 분류 | 도구 | 효과 |
 | --- | --- | --- |
-| 메트릭 | `cpu_info`, `memory_info`, `disk_info`, `swap_info`, `network_io`, `disk_io`, `collect_snapshot`, `top_processes`, `all_processes` | 읽기 전용 |
+| 메트릭 | `cpu_info`, `cpu_usage_percent`, `memory_info`, `disk_info`, `swap_info`, `network_io`, `disk_io`, `collect_snapshot`, `top_processes`, `all_processes` | 읽기 전용 |
 | 서비스 | `list_services`, `service_status` | 읽기 전용 |
 | Docker | `list_containers`, `container_stats`, `container_processes`, `container_inspect` | 읽기 전용 |
 | 로그 | `tail_log`, `search_log`, `tail_nginx_access`, `tail_container`, `search_container` | 읽기 전용 |
@@ -326,17 +328,19 @@ Monix의 대화 모드는 **2차원 멀티턴 루프**이며, `monix/core/assist
    등록된 로그 별칭 테이블과 함께 사용자 텍스트에 추가 —
    모델에게 현재 "세계관"을 미리 제공한다.
 
-2. 작업 이력 + 도구 스키마를 선택된 provider로 전송.
+2. 작업 이력 + 도구 스키마를 스트리밍으로 선택된 provider에 전송
+   (stream_round).
 
-3. 응답 부분을 검사:
-     • 텍스트만             → 종료 상태, (user, model)을
-                              호출자 이력에 추가하고 반환.
+3. SSE 스트림 소비:
+     • 텍스트 청크          → 터미널에 점진적으로 출력.
      • functionCall(들)     → call_tool()로 각각 실행하고,
                               모델 후보(thought_signature를
                               보존한 원본 그대로)와
                               functionResponse 부분들을
                               작업 이력에 추가한 뒤 다시 루프.
+     • 텍스트만(fc 없음)    → 종료 상태, (user, model)을
+                              호출자 이력에 추가하고 반환.
 
-4. 5턴 후에는 도구가 비활성화된 요약 호출로 루프가
-   종료되어, 모델이 이미 본 정보로 답변하도록 강제된다.
+4. 5턴 후에는 도구가 비활성화된 스트리밍 요약 호출(chat_stream)로
+   루프가 종료되어, 모델이 이미 본 정보로 답변하도록 강제된다.
 ```
