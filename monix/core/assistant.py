@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import textwrap
+from typing import Iterator
 
 from monix.config import Settings
 from monix.llm.providers.factory import create_client_from_settings
@@ -142,6 +143,116 @@ def answer(question: str | list[str], settings: Settings | None = None, history:
             return wrap(f"LLM API 오류: {exc.message}\n\n{local_answer(question, snapshot)}")
 
     return wrap(local_answer(question, snapshot))
+
+
+def answer_stream(
+    question: str | list[str],
+    settings: Settings | None = None,
+    history: list[dict] | None = None,
+) -> Iterator[str]:
+    """Yield text chunks as Gemini generates them.
+
+    Tool calls run synchronously (buffered, not streamed). Text responses are
+    yielded chunk-by-chunk. The caller is responsible for rendering each chunk.
+    """
+    if isinstance(question, list):
+        question = " ".join(question)
+    settings = settings or Settings.from_env()
+    snapshot = collect_snapshot(settings)
+    client = create_client_from_settings(settings)
+
+    if not client.enabled:
+        yield wrap(local_answer(question, snapshot))
+        return
+
+    snapshot_text = json.dumps(snapshot, ensure_ascii=False, indent=2)
+    log_entries = registry.load()
+    registry_text = json.dumps(
+        [{"alias": e.alias, "type": e.type, "path": e.path, "container": e.container} for e in log_entries],
+        ensure_ascii=False,
+    ) if log_entries else "[]"
+    user_text = (
+        f"{question}\n\n"
+        f"[Current Server Snapshot]\n{snapshot_text}\n"
+        f"Default log file: {settings.log_file}\n"
+        f"[Registered Log Sources (alias → path/container)]\n{registry_text}"
+    )
+    user_msg = {"role": "user", "parts": [{"text": user_text}]}
+    working: list[dict] = list((history or [])[-_MAX_HISTORY:]) + [user_msg]
+
+    try:
+        for _ in range(_MAX_TOOL_ROUNDS):
+            all_parts: list[dict] = []
+            streaming_mode: str | None = None  # "text" | "tool"
+            text_accumulated: list[str] = []
+
+            for chunk_data in client.stream_round(working, TOOL_DECLARATIONS):
+                try:
+                    parts = chunk_data["candidates"][0]["content"]["parts"]
+                except (KeyError, IndexError, TypeError):
+                    continue
+                for part in parts:
+                    if not isinstance(part, dict):
+                        continue
+                    if streaming_mode is None:
+                        if "functionCall" in part:
+                            streaming_mode = "tool"
+                        elif "text" in part:
+                            streaming_mode = "text"
+                    if streaming_mode == "text" and "text" in part:
+                        yield part["text"]
+                        text_accumulated.append(part["text"])
+                    all_parts.append(part)
+
+            candidate = {"role": "model", "parts": all_parts}
+            candidate.setdefault("role", "model")
+            function_calls = [
+                p["functionCall"] for p in all_parts
+                if isinstance(p, dict) and "functionCall" in p
+            ]
+
+            if not function_calls:
+                collected = "".join(text_accumulated)
+                final = collected or local_answer(question, snapshot)
+                if not collected:
+                    yield wrap(final)
+                _append_to_history(history, user_msg, final)
+                return
+
+            working.append(candidate)
+
+            responses = []
+            renderable: tuple[str, object] | None = None
+            for fc in function_calls:
+                fn_name = fc.get("name", "")
+                result = call_tool(fn_name, fc.get("args") or {})
+                responses.append(
+                    {"functionResponse": {"name": fn_name, "response": {"result": result}}}
+                )
+                if renderable is None and fn_name in _RENDER_MAP:
+                    renderable = (fn_name, result)
+
+            render_calls = [fc for fc in function_calls if fc.get("name") in _RENDER_MAP]
+            if len(render_calls) == 1 and renderable:
+                fn_name, raw = renderable
+                try:
+                    result_dict = json.loads(raw)
+                    yield _RENDER_MAP[fn_name](result_dict)  # type: ignore[operator]
+                    return
+                except Exception:
+                    pass
+
+            working.append({"role": "user", "parts": responses})
+
+        # _MAX_TOOL_ROUNDS exhausted — stream the final summary with no tools
+        collected = ""
+        for chunk in client.chat_stream(working):
+            yield chunk
+            collected += chunk
+        _append_to_history(history, user_msg, collected or None)
+
+    except LLMError as exc:
+        yield wrap(f"LLM API 오류: {exc.message}\n\n{local_answer(question, snapshot)}")
 
 
 def _append_to_history(
