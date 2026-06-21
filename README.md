@@ -91,8 +91,8 @@ monix --set-platform
 | --- | --- | --- |
 | `MONIX_LLM_PROVIDER` | LLM provider (`gemini` or `openai-codex`) | saved provider or Gemini legacy fallback |
 | `GEMINI_API_KEY` | Gemini API key (overrides saved key) | — |
-| `MONIX_LLM_MODEL` | Selected provider model | provider default |
-| `MONIX_MODEL` | Legacy Gemini model override | `gemini-2.5-flash` |
+| `MONIX_LLM_MODEL` | Selected provider model | `gemini-3.1-flash-preview` |
+| `MONIX_MODEL` | Legacy Gemini model override | `gemini-3.1-flash-preview` |
 | `MONIX_LOG_FILE` | Default log file path | auto-detected |
 | `MONIX_CPU_WARN` | CPU alert threshold (%) | `85.0` |
 | `MONIX_MEM_WARN` | Memory alert threshold (%) | `85.0` |
@@ -305,13 +305,15 @@ Monix's conversational mode is a **two-dimensional multi-turn loop**, implemente
 | Dimension | Meaning | State |
 | --- | --- | --- |
 | **A. Conversation turns** | Successive user prompts, each carrying prior context | Caller-owned `history: list[dict]`, accumulated across REPL turns |
-| **B. Tool-calling rounds** | Within one user prompt, the model may call tools repeatedly before answering | Loop inside `answer()` — bounded by `_MAX_TOOL_ROUNDS = 5` |
+| **B. Tool-calling rounds** | Within one user prompt, the model may call tools repeatedly before answering | Loop inside `answer_stream()` — bounded by `_MAX_TOOL_ROUNDS = 5` |
+
+Text responses are streamed incrementally via SSE (`stream_round` / `chat_stream` on `GeminiClient`), so output appears token-by-token while tool-specific Rich panels are preserved. Tool calls themselves are still executed synchronously within each round.
 
 ### Tool categories
 
 | Category | Tools | Effect |
 | --- | --- | --- |
-| Metrics | `cpu_info`, `memory_info`, `disk_info`, `swap_info`, `network_io`, `disk_io`, `collect_snapshot`, `top_processes`, `all_processes` | Read-only |
+| Metrics | `cpu_info`, `cpu_usage_percent`, `memory_info`, `disk_info`, `swap_info`, `network_io`, `disk_io`, `collect_snapshot`, `top_processes`, `all_processes` | Read-only |
 | Services | `list_services`, `service_status` | Read-only |
 | Docker | `list_containers`, `container_stats`, `container_processes`, `container_inspect` | Read-only |
 | Logs | `tail_log`, `search_log`, `tail_nginx_access`, `tail_container`, `search_container` | Read-only |
@@ -326,17 +328,20 @@ When a single read tool is called, its result is rendered directly as a Rich pan
    append it, plus the registered log alias table, to the user
    text — gives the model a current "world view" up front.
 
-2. Send working history + tool schemas → selected provider.
+2. Send working history + tool schemas → selected provider
+   via streaming (stream_round).
 
-3. Inspect response parts:
-     • text only          → terminal state, append (user, model)
-                            to caller history and return.
+3. Consume the SSE stream:
+     • text chunks        → printed incrementally to the terminal.
      • functionCall(s)    → execute each via call_tool(),
                             append the model candidate (verbatim,
                             preserving thought_signature) and the
                             functionResponse parts to the working
                             history, then loop.
+     • text only (no fc)  → terminal state, append (user, model)
+                            to caller history and return.
 
-4. After 5 rounds the loop exits with a tools-disabled summary
-   call so the model is forced to answer with what it already saw.
+4. After 5 rounds the loop exits with a tools-disabled streaming
+   summary call (chat_stream) so the model is forced to answer
+   with what it already saw.
 ```

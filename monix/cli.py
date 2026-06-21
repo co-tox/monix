@@ -15,7 +15,7 @@ from pathlib import Path
 from monix import __version__
 from monix.config import Settings
 from monix.config.settings import GEMINI_PROVIDER, OPENAI_CODEX_PROVIDER, default_model
-from monix.core.assistant import answer, infer_service_name, local_answer
+from monix.core.assistant import answer, answer_stream, infer_service_name, local_answer
 from monix.tools.collect import (
     CollectorConfig,
     collect_and_save,
@@ -203,11 +203,14 @@ def _read_line(prompt_str: str) -> str:
     - '/' as first character triggers live picker
     """
     try:
+        import re as _re
         import termios as _T
         import tty as _tty
     except ImportError:
         # Fallback for systems without termios (e.g. basic Windows CMD)
         return input(prompt_str)
+
+    _ansi_re = _re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 
     fd = sys.stdin.fileno()
     if not os.isatty(fd):
@@ -233,12 +236,35 @@ def _read_line(prompt_str: str) -> str:
         return sum(_cw(c) for c in chars)
 
     def _redraw() -> None:
-        """Redraw the input line in place (no leading newline)."""
-        sys.stdout.write("\r\x1b[K")
+        """Redraw the input line, handling multi-line terminal wrapping."""
+        term_width = shutil.get_terminal_size().columns or 80
+        prompt_w = _width(_ansi_re.sub('', prompt_line))
+        total_w = prompt_w + _width(buf)
+
+        # 현재 입력이 화면에서 차지하는 추가 줄 수 (wrap 횟수)
+        extra_lines = (total_w - 1) // term_width if total_w > 0 else 0
+
+        # 커서를 입력 첫 줄 시작으로 올리기
+        if extra_lines > 0:
+            sys.stdout.write(f"\x1b[{extra_lines}A")
+        # 현재 위치부터 화면 끝까지 지우기 (wrap된 모든 줄 포함)
+        sys.stdout.write("\r\x1b[J")
+
+        # 전체 다시 쓰기
         sys.stdout.write(prompt_line + "".join(buf))
-        w = _width(buf[cursor_pos:])
-        if w > 0:
-            sys.stdout.write(f"\x1b[{w}D")
+
+        # cursor_pos에 해당하는 물리적 줄·컬럼 계산 후 커서 이동
+        cursor_col = prompt_w + _width(buf[:cursor_pos])
+        target_line = cursor_col // term_width
+        target_col = cursor_col % term_width
+
+        line_diff = extra_lines - target_line
+        if line_diff > 0:
+            sys.stdout.write(f"\x1b[{line_diff}A")
+        sys.stdout.write("\r")
+        if target_col > 0:
+            sys.stdout.write(f"\x1b[{target_col}C")
+
         sys.stdout.flush()
 
     try:
@@ -699,8 +725,8 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
         # and assistant.py renders the result with the same Rich panels as the
         # local path. Only fall back to local logic when the LLM is unavailable.
         if settings.llm_enabled:
-            with Spinner(_llm_spinner_message(settings)):
-                return answer(raw, settings, history)
+            _print_llm_stream(raw, settings, history or [])
+            return ""
         if _is_bare_alias_input(raw, alias):
             return (
                 f"@{alias} 에 대해 무엇을 도와드릴까요?\n"
@@ -710,8 +736,8 @@ def dispatch_natural(raw: str, settings: Settings | None = None, history: list[d
 
     # Route all natural language to AI if a provider is enabled.
     if settings.llm_enabled:
-        with Spinner(_llm_spinner_message(settings)):
-            return answer(raw, settings, history)
+        _print_llm_stream(raw, settings, history or [])
+        return ""
 
     # Local fallback
     lowered = raw.lower()
@@ -732,6 +758,51 @@ def _llm_spinner_message(settings: Settings) -> str:
     if settings.llm_provider == OPENAI_CODEX_PROVIDER:
         return "Asking OpenAI Codex..."
     return "Asking Gemini..."
+
+
+def _print_llm_stream(raw: str, settings: Settings, history: list[dict]) -> None:
+    """Stream answer_stream() chunks directly to stdout with ◆ prefix."""
+    spinner = Spinner(_llm_spinner_message(settings))
+    spinner.__enter__()
+
+    first_chunk = True
+    at_line_start = False
+
+    try:
+        for chunk in answer_stream(raw, settings, history):
+            if first_chunk:
+                spinner.__exit__(None, None, None)
+                if _is_panel_output(chunk):
+                    sys.stdout.write("\n" + chunk + "\n")
+                    sys.stdout.flush()
+                    return
+                sys.stdout.write("\n" + style("◆", "cyan") + "  ")
+                sys.stdout.flush()
+                first_chunk = False
+
+            for char in chunk:
+                if at_line_start and char not in ("\n", "\r"):
+                    sys.stdout.write("  ")
+                    at_line_start = False
+                sys.stdout.write(char)
+                if char == "\n":
+                    at_line_start = True
+            sys.stdout.flush()
+
+    except KeyboardInterrupt:
+        if not first_chunk:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        else:
+            spinner.__exit__(None, None, None)
+            print(render_reply("Interrupted."))
+        return
+    finally:
+        if first_chunk:
+            spinner.__exit__(None, None, None)
+
+    sys.stdout.write("\n")
+    sys.stdout.flush()
 
 
 _METRICS = {"cpu", "memory", "mem", "disk", "swap", "net", "network", "io"}
@@ -942,6 +1013,8 @@ def main():
     full_raw = " ".join([args.command] + args.args)
     if full_raw.startswith("/"):
         print(render_reply(dispatch_command(full_raw, settings)))
+    elif sys.stdout.isatty():
+        _print_llm_stream(full_raw, settings, [])
     else:
         print(render_reply(dispatch_natural(full_raw, settings)))
     return 0
