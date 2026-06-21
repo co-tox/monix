@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Iterator, Optional
 
 from monix.llm.prompts import SYSTEM_PROMPT
 from monix.llm.types import (
@@ -110,6 +110,81 @@ class GeminiClient:
         candidate = self._extract_candidate(data)
         usage = self._extract_usage(data)
         return candidate, usage
+
+    def _stream_chunks(self, payload: dict) -> Iterator[dict]:
+        """Yield raw GenerateContentResponse dicts from the SSE streaming endpoint."""
+        url = f"{_BASE_URL}/{self.model}:streamGenerateContent?key={self.api_key}&alt=sse"
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").rstrip("\r\n")
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        yield json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        pass
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = ""
+            raise self._http_status_error(exc.code, body) from exc
+        except urllib.error.URLError as exc:
+            raise NetworkError(f"network error: {exc.reason}") from exc
+        except (OSError, TimeoutError) as exc:
+            raise NetworkError(f"network error: {exc}") from exc
+
+    def stream_round(
+        self,
+        history: History,
+        tools: Iterable[ToolSchema],
+    ) -> Iterator[dict]:
+        """Yield raw SSE data dicts for one streaming round with optional tools."""
+        if not self.api_key:
+            raise AuthError("GEMINI_API_KEY is not configured.")
+        function_declarations = list(tools)
+        payload: dict[str, Any] = {
+            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+            "contents": history,
+            "generationConfig": {
+                "maxOutputTokens": self.max_output_tokens
+                if self.max_output_tokens is not None
+                else _DEFAULT_TOOLS_MAX_OUTPUT_TOKENS,
+            },
+        }
+        if function_declarations:
+            payload["tools"] = [{"functionDeclarations": function_declarations}]
+        yield from self._stream_chunks(payload)
+
+    def chat_stream(self, history: History) -> Iterator[str]:
+        """Stream a text-only response (no tools). Yields text chunks."""
+        if not self.api_key:
+            return
+        payload: dict[str, Any] = {
+            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+            "contents": history,
+            "generationConfig": {
+                "maxOutputTokens": self.max_output_tokens
+                if self.max_output_tokens is not None
+                else _DEFAULT_CHAT_MAX_OUTPUT_TOKENS,
+            },
+        }
+        for chunk_data in self._stream_chunks(payload):
+            try:
+                parts = chunk_data["candidates"][0]["content"]["parts"]
+                for part in parts:
+                    if isinstance(part, dict) and "text" in part:
+                        yield part["text"]
+            except (KeyError, IndexError, TypeError):
+                pass
 
     def _post(self, payload: dict) -> dict:
         url = f"{_BASE_URL}/{self.model}:generateContent?key={self.api_key}"
