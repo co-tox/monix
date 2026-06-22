@@ -339,7 +339,8 @@ def pick_with_filter(prompt_prefix: str = "") -> str | None:
                 q_cursor = len(query_buf)
 
             # ── Backspace ────────────────────────────────────────────
-            elif b == b"\x7f":
+            # \x7f = DEL (most terminals), \x08 = BS (MobaXterm, some SSH clients)
+            elif b in (b"\x7f", b"\x08"):
                 if q_cursor > 0:
                     query_buf.pop(q_cursor - 1)
                     q_cursor -= 1
